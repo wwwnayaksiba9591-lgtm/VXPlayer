@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">VXPlayer</string>
+    <string name="library_title">Video library</string>
+    <string name="allow_videos">Allow video access</string>
+    <string name="permission_explanation">Allow access to find videos on your device and organize them by folder.</string>
+    <string name="settings">Open app settings</string>
+    <string name="refresh">Refresh</string>
+    <string name="manage_access">Choose videos</string>
+    <string name="partial_access">Showing selected videos. Choose videos to add more.</string>
+    <string name="empty_library">No videos found in the accessible library.</string>
+    <string name="scan_failed">Could not read videos. Check access and try refreshing.</string>
+    <string name="unknown_folder">Other videos</string>
+    <string name="unknown_video">Untitled video</string>
+    <string name="folder_count">%1$s · %2$d videos</string>
+    <string name="video_metadata">%1$s · %2$s</string>
+    <string name="thumbnail_placeholder">Video</string>
+    <string name="back_to_library">Back</string>
+    <string name="playback_failed">Could not play this video. It may be unavailable or use an unsupported format.</string>
+</resources>
