@@ -97,22 +97,24 @@ class MainActivity : ComponentActivity() {
                 val navigation = rememberNavController()
                 NavHost(navigation, startDestination = "library") {
                     composable("library") {
-                        LibraryScreen(onVideoClick = { video ->
-                            navigation.navigate("player?uri=${Uri.encode(video.uri.toString())}&title=${Uri.encode(video.title)}") {
+                        LibraryScreen(onVideoClick = { video, folder ->
+                            navigation.navigate("player?uri=${Uri.encode(video.uri.toString())}&title=${Uri.encode(video.title)}&folder=${Uri.encode(folder)}") {
                                 launchSingleTop = true
                             }
                         })
                     }
                     composable(
-                        "player?uri={uri}&title={title}",
+                        "player?uri={uri}&title={title}&folder={folder}",
                         arguments = listOf(
                             navArgument("uri") { type = NavType.StringType },
                             navArgument("title") { type = NavType.StringType },
+                            navArgument("folder") { type = NavType.StringType; defaultValue = "" },
                         ),
                     ) { entry ->
                         PlayerScreen(
                             uri = Uri.parse(requireNotNull(entry.arguments?.getString("uri"))),
                             title = entry.arguments?.getString("title").orEmpty(),
+                            folder = entry.arguments?.getString("folder").orEmpty(),
                             onBack = { navigation.popBackStack() },
                         )
                     }
@@ -129,7 +131,7 @@ private fun videoPermissions(): Array<String> = when {
 }
 
 @Composable
-private fun LibraryScreen(onVideoClick: (Video) -> Unit, model: VideoLibraryViewModel = viewModel()) {
+private fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryViewModel = viewModel()) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     fun granted(permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
@@ -190,7 +192,7 @@ private fun LibraryScreen(onVideoClick: (Video) -> Unit, model: VideoLibraryView
                                 Text(stringResource(R.string.folder_count, folder.name, folder.videos.size),
                                     style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
                             }
-                            items(folder.videos, key = { it.uri.toString() }) { video -> VideoRow(video, onClick = { onVideoClick(video) }) }
+                            items(folder.videos, key = { it.uri.toString() }) { video -> VideoRow(video, onClick = { onVideoClick(video, folder.key) }) }
                         }
                     }
                 }

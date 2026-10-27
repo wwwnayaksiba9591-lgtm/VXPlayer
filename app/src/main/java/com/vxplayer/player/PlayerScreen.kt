@@ -42,7 +42,7 @@ import kotlin.math.roundToInt
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewModel = viewModel()) {
+fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "", model: PlayerViewModel = viewModel()) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val activity = LocalActivity.current
     val host = activity as? MainActivity
@@ -91,14 +91,14 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
     DisposableEffect(lifecycle, uri) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> model.start(uri, title)
+                Lifecycle.Event.ON_START -> model.start(uri, title, folder)
                 Lifecycle.Event.ON_PAUSE -> model.savePlaybackState()
                 Lifecycle.Event.ON_STOP -> if (host?.pipMode != true) model.stop()
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) model.start(uri, title)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) model.start(uri, title, folder)
         onDispose {
             lifecycle.removeObserver(observer)
             model.stop()
@@ -198,7 +198,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onBack) { Text(stringResource(R.string.back_to_library), color = Color.White) }
-            Text(title, color = Color.White, modifier = Modifier.weight(1f).padding(8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(model.activeTitle.ifBlank { title }, color = Color.White, modifier = Modifier.weight(1f).padding(8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
             TrackMenu(model)
             Box {
                 val speedLabel = stringResource(R.string.playback_speed_value, model.speed.toString().removeSuffix(".0"))
@@ -221,6 +221,12 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             }
         }
         Row(Modifier.horizontalScroll(rememberScrollState())) {
+            TextButton(onClick = { model.moveInPlaylist(-1) }, enabled = model.player != null && adjacentVideo(model.playlist, model.activeUri, -1) != null) {
+                Text(stringResource(R.string.previous_video))
+            }
+            TextButton(onClick = { model.moveInPlaylist(1) }, enabled = model.player != null && adjacentVideo(model.playlist, model.activeUri, 1) != null) {
+                Text(stringResource(R.string.next_video))
+            }
             OrientationControls(orientation)
             if (android.os.Build.VERSION.SDK_INT >= 26 && context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
                 TextButton(onClick = { host?.enterPlayerPip(manual = true) }, enabled = model.player != null) {

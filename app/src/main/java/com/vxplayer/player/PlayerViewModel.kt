@@ -26,12 +26,22 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
     var tracks by mutableStateOf(Tracks.EMPTY)
         private set
     var choosingSubtitle by mutableStateOf(false)
+    var activeUri by mutableStateOf(savedState.get<String>("activeUri"))
+        private set
+    var activeTitle by mutableStateOf(savedState.get<String>("activeTitle").orEmpty())
+        private set
+    var playlist by mutableStateOf<List<PlaylistVideo>>(emptyList())
+        private set
+    private var advance: Job? = null
     var player by mutableStateOf<ExoPlayer?>(null)
         private set
     var failed by mutableStateOf(false)
@@ -46,13 +56,25 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private var currentUri: String? = null
 
     // Only lightweight playback state survives rotation; the decoder and surface are released.
-    fun start(uri: Uri, title: String) {
+    fun start(uri: Uri, title: String, folder: String = savedState.get<String>("folder").orEmpty()) {
         if (player != null || starting?.isActive == true) return
         failed = false
-        currentUri = uri.toString()
+        savedState["folder"] = folder
+        val selectedUri = activeUri ?: uri.toString()
+        activeUri = selectedUri
+        if (activeTitle.isBlank()) activeTitle = title
+        savedState["activeUri"] = selectedUri
+        savedState["activeTitle"] = activeTitle
+        currentUri = selectedUri
         starting = viewModelScope.launch {
+            if (playlist.isEmpty()) {
+                playlist = try { withContext(Dispatchers.IO) { loadFolderPlaylist(getApplication(), folder) } }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { emptyList() }
+                if (playlist.none { it.uri == selectedUri }) playlist = listOf(PlaylistVideo(selectedUri, activeTitle))
+            }
             val position = savedState.get<Long>("position") ?: try {
-                positions.load(uri.toString()) ?: 0L
+                positions.load(selectedUri) ?: 0L
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -76,7 +98,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         if (!playing) savePlaybackState()
                     }
                     override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_ENDED) savePlaybackState()
+                        if (state == Player.STATE_ENDED) {
+                            savePlaybackState()
+                            advance = viewModelScope.launch {
+                                yield()
+                                if (player?.playbackState == Player.STATE_ENDED) moveInPlaylist(1)
+                            }
+                        }
                     }
                     override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                         savePlaybackState()
@@ -86,7 +114,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         savedState["speed"] = parameters.speed
                     }
                 })
-                setMediaItem(buildMediaItem(uri, title))
+                setMediaItem(buildMediaItem(Uri.parse(selectedUri), activeTitle))
                 seekTo(position.coerceAtLeast(0L))
                 setPlaybackSpeed(this@PlayerViewModel.speed)
                 playWhenReady = savedState.get<Boolean>("playWhenReady") ?: true
@@ -99,6 +127,20 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 }
             }
         }
+    }
+
+    fun moveInPlaylist(offset: Int) {
+        val next = adjacentVideo(playlist, activeUri, offset) ?: return
+        stop()
+        savedState.remove<Long>("position")
+        savedState["playWhenReady"] = true
+        savedState.remove<Bundle>("trackParameters")
+        savedState.remove<String>("subtitleUri")
+        savedState.remove<String>("subtitleName")
+        tracks = Tracks.EMPTY
+        activeUri = next.uri
+        activeTitle = next.title
+        start(Uri.parse(next.uri), next.title)
     }
 
     private fun buildMediaItem(uri: Uri, title: String): MediaItem {
@@ -167,6 +209,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun stop() {
+        advance?.cancel()
+        advance = null
         starting?.cancel()
         starting = null
         checkpoint?.cancel()
