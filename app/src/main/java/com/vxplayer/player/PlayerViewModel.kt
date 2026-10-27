@@ -88,7 +88,19 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     trackSelectionParameters = TrackSelectionParameters.fromBundle(it)
                 }
                 addListener(object : Player.Listener {
-                    override fun onTracksChanged(value: Tracks) { tracks = value }
+                    override fun onTracksChanged(value: Tracks) {
+                        tracks = value
+                        if (savedState.get<Boolean>("selectExternal") == true) {
+                            value.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
+                                repeat(group.length) { index ->
+                                    if (group.getTrackFormat(index).id?.contains("external-srt") == true && group.isTrackSupported(index)) {
+                                        savedState["selectExternal"] = false
+                                        selectTrack(group, index)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
                         savedState["trackParameters"] = parameters.toBundle()
                     }
@@ -138,6 +150,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState.remove<Bundle>("trackParameters")
         savedState.remove<String>("subtitleUri")
         savedState.remove<String>("subtitleName")
+        savedState.remove<Boolean>("selectExternal")
         tracks = Tracks.EMPTY
         activeUri = next.uri
         activeTitle = next.title
@@ -159,12 +172,14 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun selectTrack(group: Tracks.Group, index: Int) {
         val current = player ?: return
         if (!group.isTrackSupported(index)) return
+        if (group.type == C.TRACK_TYPE_TEXT) savedState["selectExternal"] = false
         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(group.type, false).clearOverridesOfType(group.type)
             .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index)).build()
     }
 
     fun setTrackType(type: Int, enabled: Boolean) {
+        if (type == C.TRACK_TYPE_TEXT) savedState["selectExternal"] = false
         val current = player ?: return
         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(type).setTrackTypeDisabled(type, !enabled).build()
@@ -173,11 +188,19 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun loadSubtitle(uri: Uri, name: String) {
         savedState["subtitleUri"] = uri.toString()
         savedState["subtitleName"] = name
+        val parameters = player?.trackSelectionParameters ?: savedState.get<Bundle>("trackParameters")?.let {
+            TrackSelectionParameters.fromBundle(it)
+        } ?: TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT
+        val updated = parameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
+        savedState["trackParameters"] = updated.toBundle()
+        savedState["selectExternal"] = true
         val current = player ?: return
         val media = current.currentMediaItem ?: return
         val position = current.currentPosition
         val playing = current.playWhenReady
-        setTrackType(C.TRACK_TYPE_TEXT, true)
+        current.trackSelectionParameters = updated
+        savedState["selectExternal"] = true
         current.setMediaItem(buildMediaItem(Uri.parse(currentUri), media.mediaMetadata.title.toString()), position)
         current.prepare()
         current.playWhenReady = playing

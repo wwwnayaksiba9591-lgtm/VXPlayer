@@ -17,7 +17,16 @@ $env:ANDROID_USER_HOME = "$PWD/.tools/android-user"
 .\gradlew.bat assembleDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. VXPlayer uses version name `1.1.0` and version code `2`.
+
+Run unit tests and build the release APK with the same environment:
+
+```powershell
+.\gradlew.bat testDebugUnitTest
+.\gradlew.bat assembleRelease
+```
+
+Release minification and resource shrinking are disabled. The release output is `app/build/outputs/apk/release/app-release-unsigned.apk`; distribution requires your own release signing key.
 
 Device checks:
 
@@ -36,7 +45,19 @@ Device checks:
 - Swipe up/down on the left half to adjust brightness and on the right half to adjust media volume; verify the indicator disappears after release.
 - Verify single taps still toggle controls, play/pause and seek-bar dragging still work, and horizontal swipes do not change brightness or volume.
 - Rotate after a brightness adjustment, then return to the library: verify player brightness survives rotation and library brightness returns to its original setting.
-- Press Home or lock the device: verify playback stops; return and verify the saved position resumes.
+- On devices without PiP support or with PiP disabled in system settings, press Home: verify playback stops and returns to its saved position. Lock the device and verify no hidden playback continues after the activity stops.
 - Open an unavailable or unsupported video: verify an error appears and Back remains available.
 
-The screen lists MediaStore-indexed videos accessible to the app. Playback uses Media3 ExoPlayer; its resources are released on stop and screen exit. Rotation preserves position and play/pause state without retaining an Activity or video surface.
+New-feature device checklist (not yet verified on hardware):
+
+- Use a video with several embedded audio/subtitle tracks. In **Tracks**, switch audio languages, select subtitles, then choose **Off**. Verify unsupported tracks are disabled and videos without embedded tracks remain playable.
+- Select **Load subtitle file** and pick a readable `.srt` document. Verify captions appear at the current position, rotation and background/foreground preserve the attachment, and **Off** hides it. Test cancelling the picker, picking a different file type, loading after subtitles were turned off, and loading another SRT. Imported subtitles apply only to the current video.
+- Use **Lock rotation**, physically rotate the device, then unlock. Use **Portrait / landscape** in both directions. Verify playback position, paused state, speed, and track selections survive; returning to the library restores the original orientation policy. Some large-screen devices may ignore orientation requests.
+- During playback, tap the video background: verify controls and system bars appear. Tap again or wait for controls to hide: verify system bars hide. Verify Back still works and system bars return in the library.
+- On Android 26+ devices supporting PiP, press Home during playback and separately tap **PiP**. Verify video/audio continue, app controls disappear from the small window, and expanding the window restores title, controls, speed, selected tracks, and position. Test dismissing PiP, pausing before Home, disabling PiP in system settings, and opening the subtitle picker without unintended PiP entry. Android 24–25 and devices without PiP retain normal stop/resume behavior.
+- Open the middle video in a folder. Use **Previous** and **Next**, verifying folder order and per-video resume positions. Finish a video: verify automatic advance is on by default. At the first/last video, verify the unavailable direction is disabled and playback stops at the end rather than looping. Test advancing in PiP and after rotation; external subtitles must not carry over to another video.
+- Play at least 21 different accessible videos and verify **Recently played** appears above folders, newest first, with at most 20 distinct videos. Replay an older video and check it moves to the top without duplication. Restart the app and verify history persists. Remove a video or revoke access and verify it disappears from the visible list.
+- Upgrade an installation with the previous Room schema: verify existing resume positions survive while the history table is added. Actual database migration remains a device check; unit tests cover persistence-command ordering and playlist boundaries.
+- Check the original VXPlayer icon on Android 24–25 and on launchers using adaptive round/square masks. Verify the app name and version, and install a separately signed release build for a playback smoke test.
+
+The library lists accessible MediaStore-indexed videos. Playback resources are released when the player screen exits or the activity is stopped, while visible PiP continues playing. Orientation changes resize the Compose UI and video surface without recreating the activity; saved state also preserves the active playlist video, position, play/pause state, speed, and track choices if the activity is recreated. Room stores resume positions by URI and the last 20 played videos; completion clears a video's resume position. Folder playlists follow the library's title ordering and automatically advance without wrapping.

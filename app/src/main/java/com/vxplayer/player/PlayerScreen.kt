@@ -186,7 +186,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         )
         if (!inPip) indicator?.let {
             Text(it, color = Color.White,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 88.dp)
+                modifier = Modifier.align(Alignment.Center)
                     .background(Color.Black.copy(alpha = 0.75f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp))
         }
