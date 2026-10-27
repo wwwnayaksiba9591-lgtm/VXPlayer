@@ -50,6 +50,16 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         }
     }
 
+    fun seekBy(offsetMs: Long): Boolean {
+        val current = player ?: return false
+        if (!current.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) || !current.isCurrentMediaItemSeekable) return false
+        val duration = current.duration
+        val target = (current.currentPosition + offsetMs).coerceAtLeast(0L)
+        current.seekTo(if (duration != C.TIME_UNSET) target.coerceAtMost(duration.coerceAtLeast(0L)) else target)
+        savePlaybackState()
+        return true
+    }
+
     fun stop() {
         savePlaybackState()
         val previous = player

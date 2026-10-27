@@ -29,6 +29,10 @@ Device checks:
 - Add or remove a video, then refresh or leave and return to the app.
 - Tap a video: verify fullscreen playback, title, play/pause, seeking, and Back returning to the library.
 - Rotate while playing and while paused: verify the title, position, and play/pause state survive.
+- Double-tap the video background on the left/right to seek backward/forward 10 seconds, including near the start/end.
+- Swipe up/down on the left half to adjust brightness and on the right half to adjust media volume; verify the indicator disappears after release.
+- Verify single taps still toggle controls, play/pause and seek-bar dragging still work, and horizontal swipes do not change brightness or volume.
+- Rotate after a brightness adjustment, then return to the library: verify player brightness survives rotation and library brightness returns to its original setting.
 - Press Home or lock the device: verify playback stops; return and verify the saved position resumes.
 - Open an unavailable or unsupported video: verify an error appears and Back remains available.
 

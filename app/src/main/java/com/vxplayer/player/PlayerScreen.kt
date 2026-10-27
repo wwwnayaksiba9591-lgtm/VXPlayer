@@ -1,16 +1,20 @@
 package com.vxplayer.player
 
 import android.net.Uri
+import android.content.Context
+import android.media.AudioManager
+import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -25,12 +29,42 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.vxplayer.R
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewModel = viewModel()) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val activity = LocalActivity.current
+    val context = LocalContext.current
+    val audio = remember(context) { context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val window = activity?.window
+    var brightness by rememberSaveable(uri.toString()) { mutableFloatStateOf(-1f) }
+    var swipeStart by remember { mutableFloatStateOf(0f) }
+    var adjustingBrightness by remember { mutableStateOf(false) }
+    var swiping by remember { mutableStateOf(false) }
+    var indicator by remember { mutableStateOf<String?>(null) }
+    var indicatorVersion by remember { mutableIntStateOf(0) }
+
+    // A per-window override needs no system-settings permission and must not leak into the library.
+    DisposableEffect(window) {
+        val original = window?.attributes?.screenBrightness
+        onDispose {
+            if (original != null) window.attributes = window.attributes.apply { screenBrightness = original }
+        }
+    }
+    LaunchedEffect(window, brightness) {
+        if (brightness >= 0f && window != null) {
+            window.attributes = window.attributes.apply { screenBrightness = brightness }
+        }
+    }
+    LaunchedEffect(indicatorVersion, swiping) {
+        if (!swiping) {
+            delay(1000)
+            indicator = null
+        }
+    }
 
     DisposableEffect(lifecycle, uri) {
         val observer = LifecycleEventObserver { _, event ->
@@ -64,7 +98,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                PlayerView(context).apply {
+                GesturePlayerView(context).apply {
                     useController = true
                     setShowNextButton(false)
                     setShowPreviousButton(false)
@@ -75,12 +109,55 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             update = {
                 it.player = model.player
                 it.keepScreenOn = model.isPlaying
+                it.onSeek = { forward ->
+                    if (model.seekBy(if (forward) 10_000L else -10_000L)) {
+                        indicator = context.getString(if (forward) R.string.seek_forward else R.string.seek_backward)
+                        indicatorVersion++
+                    }
+                }
+                it.onSwipeStart = { left ->
+                    adjustingBrightness = left
+                    swiping = true
+                    swipeStart = if (left) {
+                        brightness.takeIf { value -> value >= 0f }
+                            ?: window?.attributes?.screenBrightness?.takeIf { value -> value >= 0f }
+                            ?: (Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128) / 255f)
+                    } else audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
+                }
+                it.onSwipe = { fraction ->
+                    if (adjustingBrightness) {
+                        brightness = (swipeStart + fraction).coerceIn(0.01f, 1f)
+                        indicator = context.getString(R.string.gesture_brightness, (brightness * 100).roundToInt())
+                    } else {
+                        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        if (audio.isVolumeFixed || max == 0) {
+                            indicator = context.getString(R.string.gesture_volume_unavailable)
+                        } else {
+                            val volume = (swipeStart + fraction * max).roundToInt().coerceIn(0, max)
+                            try {
+                                audio.setStreamVolume(AudioManager.STREAM_MUSIC, volume, 0)
+                                val actual = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                indicator = context.getString(R.string.gesture_volume, (actual * 100f / max).roundToInt())
+                            } catch (_: SecurityException) {
+                                indicator = context.getString(R.string.gesture_volume_unavailable)
+                            }
+                        }
+                    }
+                    indicatorVersion++
+                }
+                it.onSwipeEnd = { swiping = false }
             },
             onRelease = {
                 it.player = null
                 it.keepScreenOn = false
             },
         )
+        indicator?.let {
+            Text(it, color = Color.White,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 88.dp)
+                    .background(Color.Black.copy(alpha = 0.75f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp))
+        }
         Row(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .background(Color.Black.copy(alpha = 0.6f)).safeDrawingPadding().padding(horizontal = 12.dp),

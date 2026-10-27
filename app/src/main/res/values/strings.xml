@@ -16,4 +16,9 @@
     <string name="thumbnail_placeholder">Video</string>
     <string name="back_to_library">Back</string>
     <string name="playback_failed">Could not play this video. It may be unavailable or use an unsupported format.</string>
+    <string name="seek_forward">+10 s</string>
+    <string name="seek_backward">−10 s</string>
+    <string name="gesture_brightness">Brightness %1$d%%</string>
+    <string name="gesture_volume">Volume %1$d%%</string>
+    <string name="gesture_volume_unavailable">Volume is controlled by the device</string>
 </resources>
