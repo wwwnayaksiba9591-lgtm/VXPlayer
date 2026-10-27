@@ -32,5 +32,8 @@
     <string name="load_subtitle">Load subtitle file</string>
     <string name="subtitle_error">Choose a readable .srt subtitle file.</string>
     <string name="ok">OK</string>
+    <string name="lock_orientation">Lock rotation</string>
+    <string name="unlock_orientation">Unlock rotation</string>
+    <string name="rotate_screen">Portrait / landscape</string>
 </resources>
 

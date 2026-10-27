@@ -6,6 +6,8 @@ import android.media.AudioManager
 import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -106,6 +108,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             factory = { context ->
                 GesturePlayerView(context).apply {
                     useController = true
+                    controllerAutoShow = false
                     setShowNextButton(false)
                     setShowPreviousButton(false)
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
@@ -114,6 +117,13 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             },
             update = {
                 it.player = model.player
+                it.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+                    window?.let { currentWindow ->
+                        val controller = WindowCompat.getInsetsController(currentWindow, currentWindow.decorView)
+                        if (visibility == android.view.View.VISIBLE) controller.show(WindowInsetsCompat.Type.systemBars())
+                        else controller.hide(WindowInsetsCompat.Type.systemBars())
+                    }
+                })
                 it.keepScreenOn = model.isPlaying
                 it.onSeek = { forward ->
                     if (model.seekBy(if (forward) 10_000L else -10_000L)) {
@@ -154,6 +164,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
                 it.onSwipeEnd = { swiping = false }
             },
             onRelease = {
+                it.setControllerVisibilityListener(null as PlayerView.ControllerVisibilityListener?)
                 it.player = null
                 it.keepScreenOn = false
             },
@@ -164,9 +175,11 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
                     .background(Color.Black.copy(alpha = 0.75f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp))
         }
-        Row(
+        Column(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .background(Color.Black.copy(alpha = 0.6f)).safeDrawingPadding().padding(horizontal = 12.dp),
+        ) {
+        Row(Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onBack) { Text(stringResource(R.string.back_to_library), color = Color.White) }
@@ -191,6 +204,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
                     }
                 }
             }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState())) { OrientationControls() }
         }
         if (model.failed) {
             Text(stringResource(R.string.playback_failed), color = Color.White,
