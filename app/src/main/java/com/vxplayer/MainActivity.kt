@@ -7,6 +7,9 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
+import android.util.Rational
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Size
@@ -51,6 +54,41 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    var pipMode by mutableStateOf(false)
+        private set
+    var canEnterPip: () -> Boolean = { false }
+    var releaseHiddenPlayer: () -> Unit = {}
+
+    fun updatePip() {
+        if (Build.VERSION.SDK_INT >= 31 && packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            setPictureInPictureParams(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+                .setAutoEnterEnabled(canEnterPip()).build())
+        }
+    }
+
+    fun enterPlayerPip(manual: Boolean = false): Boolean {
+        if (Build.VERSION.SDK_INT < 26 || (!manual && !canEnterPip()) ||
+            !packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return try { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()) }
+        catch (_: IllegalStateException) { false }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < 31) enterPlayerPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipMode = isInPictureInPictureMode
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Visible PiP is STARTED. STOPPED means even the PiP surface is no longer visible.
+        releaseHiddenPlayer()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

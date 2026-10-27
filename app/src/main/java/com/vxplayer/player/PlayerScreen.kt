@@ -36,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.vxplayer.R
+import com.vxplayer.MainActivity
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -44,6 +45,9 @@ import kotlin.math.roundToInt
 fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewModel = viewModel()) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val activity = LocalActivity.current
+    val host = activity as? MainActivity
+    val inPip = host?.pipMode == true
+    val orientation = rememberOrientationController()
     val context = LocalContext.current
     val audio = remember(context) { context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val window = activity?.window
@@ -54,6 +58,16 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
     var indicator by remember { mutableStateOf<String?>(null) }
     var indicatorVersion by remember { mutableIntStateOf(0) }
     var speedMenuOpen by remember { mutableStateOf(false) }
+    DisposableEffect(host, model) {
+        host?.canEnterPip = { model.player?.let { it.playWhenReady && it.playbackState != androidx.media3.common.Player.STATE_ENDED } == true && !model.failed && !model.choosingSubtitle }
+        host?.releaseHiddenPlayer = { model.stop() }
+        onDispose {
+            host?.canEnterPip = { false }
+            host?.releaseHiddenPlayer = {}
+            host?.updatePip()
+        }
+    }
+    LaunchedEffect(host, model.isPlaying, model.choosingSubtitle) { host?.updatePip() }
 
     // A per-window override needs no system-settings permission and must not leak into the library.
     DisposableEffect(window) {
@@ -79,7 +93,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             when (event) {
                 Lifecycle.Event.ON_START -> model.start(uri, title)
                 Lifecycle.Event.ON_PAUSE -> model.savePlaybackState()
-                Lifecycle.Event.ON_STOP -> model.stop()
+                Lifecycle.Event.ON_STOP -> if (host?.pipMode != true) model.stop()
                 else -> Unit
             }
         }
@@ -117,10 +131,11 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
             },
             update = {
                 it.player = model.player
+                it.useController = !inPip
                 it.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
                     window?.let { currentWindow ->
                         val controller = WindowCompat.getInsetsController(currentWindow, currentWindow.decorView)
-                        if (visibility == android.view.View.VISIBLE) controller.show(WindowInsetsCompat.Type.systemBars())
+                        if (visibility == android.view.View.VISIBLE && !inPip) controller.show(WindowInsetsCompat.Type.systemBars())
                         else controller.hide(WindowInsetsCompat.Type.systemBars())
                     }
                 })
@@ -169,13 +184,13 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
                 it.keepScreenOn = false
             },
         )
-        indicator?.let {
+        if (!inPip) indicator?.let {
             Text(it, color = Color.White,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 88.dp)
                     .background(Color.Black.copy(alpha = 0.75f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp))
         }
-        Column(
+        if (!inPip) Column(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .background(Color.Black.copy(alpha = 0.6f)).safeDrawingPadding().padding(horizontal = 12.dp),
         ) {
@@ -205,7 +220,14 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
                 }
             }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState())) { OrientationControls() }
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            OrientationControls(orientation)
+            if (android.os.Build.VERSION.SDK_INT >= 26 && context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                TextButton(onClick = { host?.enterPlayerPip(manual = true) }, enabled = model.player != null) {
+                    Text(stringResource(R.string.picture_in_picture), color = Color.White)
+                }
+            }
+        }
         }
         if (model.failed) {
             Text(stringResource(R.string.playback_failed), color = Color.White,

@@ -7,31 +7,44 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import com.vxplayer.R
 
+class OrientationController(locked: Boolean = false, requested: Int = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+    var locked by mutableStateOf(locked)
+    var requested by mutableIntStateOf(requested)
+}
+
 @Composable
-fun OrientationControls() {
-    val activity = LocalActivity.current ?: return
-    val configuration = LocalConfiguration.current
+fun rememberOrientationController(): OrientationController {
+    val state = rememberSaveable(saver = Saver<OrientationController, List<Int>>(
+        save = { listOf(if (it.locked) 1 else 0, it.requested) },
+        restore = { OrientationController(it[0] == 1, it[1]) },
+    )) { OrientationController() }
+    val activity = LocalActivity.current ?: return state
     val original = rememberSaveable { activity.requestedOrientation }
-    var locked by rememberSaveable { mutableStateOf(false) }
-    var requested by rememberSaveable { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
     DisposableEffect(activity) {
         onDispose { if (!activity.isChangingConfigurations) activity.requestedOrientation = original }
     }
-    LaunchedEffect(activity, requested) { activity.requestedOrientation = requested }
+    LaunchedEffect(activity, state.requested) { activity.requestedOrientation = state.requested }
+    return state
+}
+
+@Composable
+fun OrientationControls(state: OrientationController) {
+    val configuration = LocalConfiguration.current
     TextButton(onClick = {
-        locked = !locked
-        requested = if (!locked) ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        state.locked = !state.locked
+        state.requested = if (!state.locked) ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             else if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-    }) { Text(stringResource(if (locked) R.string.unlock_orientation else R.string.lock_orientation), color = Color.White) }
+    }) { Text(stringResource(if (state.locked) R.string.unlock_orientation else R.string.lock_orientation), color = Color.White) }
     TextButton(onClick = {
-        locked = true
-        requested = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        state.locked = true
+        state.requested = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
     }) { Text(stringResource(R.string.rotate_screen), color = Color.White) }
 }

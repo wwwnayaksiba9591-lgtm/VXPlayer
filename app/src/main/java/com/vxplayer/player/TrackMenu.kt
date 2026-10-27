@@ -28,6 +28,7 @@ fun TrackMenu(model: PlayerViewModel) {
     var error by remember { mutableStateOf(false) }
     val names = remember(context) { DefaultTrackNameProvider(context.resources) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        model.choosingSubtitle = false
         if (uri != null) {
             try {
                 val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
@@ -65,7 +66,7 @@ fun TrackMenu(model: PlayerViewModel) {
                 }
             }
             DropdownMenuItem(text = { Text(stringResource(R.string.load_subtitle)) },
-                onClick = { expanded = false; picker.launch(arrayOf("*/*")) })
+                onClick = { expanded = false; model.choosingSubtitle = true; picker.launch(arrayOf("*/*")) })
         }
     }
     if (error) AlertDialog(onDismissRequest = { error = false }, text = { Text(stringResource(R.string.subtitle_error)) },

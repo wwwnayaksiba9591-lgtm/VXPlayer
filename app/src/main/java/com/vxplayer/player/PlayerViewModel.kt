@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
     var tracks by mutableStateOf(Tracks.EMPTY)
         private set
+    var choosingSubtitle by mutableStateOf(false)
     var player by mutableStateOf<ExoPlayer?>(null)
         private set
     var failed by mutableStateOf(false)
