@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vxplayer.R
+import com.vxplayer.player.PlaybackPositionStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,7 +21,8 @@ import kotlin.coroutines.coroutineContext
 
 data class Video(val uri: Uri, val title: String, val durationMs: Long, val sizeBytes: Long)
 data class VideoFolder(val key: String, val name: String, val videos: List<Video>)
-data class LibraryState(val loading: Boolean = false, val folders: List<VideoFolder> = emptyList(), val failed: Boolean = false)
+data class LibraryState(val loading: Boolean = false, val folders: List<VideoFolder> = emptyList(), val failed: Boolean = false,
+    val recentlyPlayed: List<Video> = emptyList())
 
 class VideoLibraryViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableState = MutableStateFlow(LibraryState())
@@ -34,7 +36,11 @@ class VideoLibraryViewModel(application: Application) : AndroidViewModel(applica
         scan = viewModelScope.launch {
             try {
                 val folders = withContext(Dispatchers.IO) { queryVideos() }
-                mutableState.value = LibraryState(folders = folders)
+                val recent = try { PlaybackPositionStore.get(getApplication()).recent() }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { emptyList() }
+                val accessible = folders.flatMap { it.videos }.associateBy { it.uri.toString() }
+                mutableState.value = LibraryState(folders = folders, recentlyPlayed = recent.mapNotNull { accessible[it.uri] })
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

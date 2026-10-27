@@ -187,6 +187,15 @@ private fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLib
                     state.failed -> Text(stringResource(R.string.scan_failed))
                     state.folders.isEmpty() -> Text(stringResource(R.string.empty_library))
                     else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (state.recentlyPlayed.isNotEmpty()) {
+                            item(key = "recent-heading") { Text(stringResource(R.string.recently_played), style = MaterialTheme.typography.titleMedium) }
+                            items(state.recentlyPlayed, key = { "recent:${it.uri}" }) { video ->
+                                VideoRow(video, onClick = {
+                                    val folder = state.folders.firstOrNull { group -> group.videos.any { it.uri == video.uri } }
+                                    onVideoClick(video, folder?.key.orEmpty())
+                                })
+                            }
+                        }
                         state.folders.forEach { folder ->
                             item(key = "folder:${folder.key}") {
                                 Text(stringResource(R.string.folder_count, folder.name, folder.videos.size),

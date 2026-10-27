@@ -95,6 +95,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     override fun onPlayerError(error: PlaybackException) { failed = true }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@PlayerViewModel.isPlaying = playing
+                        if (playing) currentUri?.let { positions.recordPlayed(it, activeTitle) }
                         if (!playing) savePlaybackState()
                     }
                     override fun onPlaybackStateChanged(state: Int) {

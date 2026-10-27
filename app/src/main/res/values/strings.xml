@@ -38,6 +38,8 @@
     <string name="picture_in_picture">PiP</string>
     <string name="previous_video">Previous</string>
     <string name="next_video">Next</string>
+    <string name="recently_played">Recently played</string>
 </resources>
+
 
 
