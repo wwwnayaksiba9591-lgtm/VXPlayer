@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -16,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -46,6 +51,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
     var swiping by remember { mutableStateOf(false) }
     var indicator by remember { mutableStateOf<String?>(null) }
     var indicatorVersion by remember { mutableIntStateOf(0) }
+    var speedMenuOpen by remember { mutableStateOf(false) }
 
     // A per-window override needs no system-settings permission and must not leak into the library.
     DisposableEffect(window) {
@@ -165,6 +171,25 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
         ) {
             TextButton(onClick = onBack) { Text(stringResource(R.string.back_to_library), color = Color.White) }
             Text(title, color = Color.White, modifier = Modifier.weight(1f).padding(8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Box {
+                val speedLabel = stringResource(R.string.playback_speed_value, model.speed.toString().removeSuffix(".0"))
+                val speedDescription = stringResource(R.string.playback_speed_description, speedLabel)
+                TextButton(onClick = { speedMenuOpen = true }, modifier = Modifier.semantics { contentDescription = speedDescription }) {
+                    Text(speedLabel, color = Color.White)
+                }
+                DropdownMenu(expanded = speedMenuOpen, onDismissRequest = { speedMenuOpen = false }) {
+                    PlayerViewModel.SPEEDS.forEach { speed ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.playback_speed_value, speed.toString().removeSuffix(".0"))) },
+                            modifier = Modifier.semantics { selected = model.speed == speed },
+                            onClick = {
+                                model.changeSpeed(speed)
+                                speedMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
         }
         if (model.failed) {
             Text(stringResource(R.string.playback_failed), color = Color.White,

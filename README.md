@@ -29,6 +29,9 @@ Device checks:
 - Add or remove a video, then refresh or leave and return to the app.
 - Tap a video: verify fullscreen playback, title, play/pause, seeking, and Back returning to the library.
 - Rotate while playing and while paused: verify the title, position, and play/pause state survive.
+- Use the speed button to select 0.5x, 0.75x, 1x, 1.25x, 1.5x, or 2x; verify the chosen rate survives rotation and background/foreground transitions.
+- Seek in two different videos, leave each, then reopen: verify each resumes at its own saved position, including after restarting the app.
+- Let a video finish, then reopen it: verify it starts at the beginning. Repeat after rotation or backgrounding on the end screen.
 - Double-tap the video background on the left/right to seek backward/forward 10 seconds, including near the start/end.
 - Swipe up/down on the left half to adjust brightness and on the right half to adjust media volume; verify the indicator disappears after release.
 - Verify single taps still toggle controls, play/pause and seek-bar dragging still work, and horizontal swipes do not change brightness or volume.

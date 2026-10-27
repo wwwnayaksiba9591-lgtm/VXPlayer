@@ -21,4 +21,6 @@
     <string name="gesture_brightness">Brightness %1$d%%</string>
     <string name="gesture_volume">Volume %1$d%%</string>
     <string name="gesture_volume_unavailable">Volume is controlled by the device</string>
+    <string name="playback_speed_value">%1$sx</string>
+    <string name="playback_speed_description">Playback speed: %1$s</string>
 </resources>

@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 android {
     namespace = "com.vxplayer"
@@ -34,4 +35,6 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+    testImplementation(libs.junit)
 }
