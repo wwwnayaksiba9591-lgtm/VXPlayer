@@ -171,6 +171,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, model: PlayerViewM
         ) {
             TextButton(onClick = onBack) { Text(stringResource(R.string.back_to_library), color = Color.White) }
             Text(title, color = Color.White, modifier = Modifier.weight(1f).padding(8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            TrackMenu(model)
             Box {
                 val speedLabel = stringResource(R.string.playback_speed_value, model.speed.toString().removeSuffix(".0"))
                 val speedDescription = stringResource(R.string.playback_speed_description, speedLabel)

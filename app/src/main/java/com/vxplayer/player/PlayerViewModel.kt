@@ -2,6 +2,12 @@ package com.vxplayer.player
 
 import android.app.Application
 import android.net.Uri
+import android.os.Bundle
+import androidx.media3.common.Tracks
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -21,7 +27,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
+    var tracks by mutableStateOf(Tracks.EMPTY)
+        private set
     var player by mutableStateOf<ExoPlayer?>(null)
         private set
     var failed by mutableStateOf(false)
@@ -52,7 +61,14 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
                 setHandleAudioBecomingNoisy(true)
+                savedState.get<Bundle>("trackParameters")?.let {
+                    trackSelectionParameters = TrackSelectionParameters.fromBundle(it)
+                }
                 addListener(object : Player.Listener {
+                    override fun onTracksChanged(value: Tracks) { tracks = value }
+                    override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
+                        savedState["trackParameters"] = parameters.toBundle()
+                    }
                     override fun onPlayerError(error: PlaybackException) { failed = true }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@PlayerViewModel.isPlaying = playing
@@ -69,8 +85,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         savedState["speed"] = parameters.speed
                     }
                 })
-                setMediaItem(MediaItem.Builder().setUri(uri)
-                    .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build()).build())
+                setMediaItem(buildMediaItem(uri, title))
                 seekTo(position.coerceAtLeast(0L))
                 setPlaybackSpeed(this@PlayerViewModel.speed)
                 playWhenReady = savedState.get<Boolean>("playWhenReady") ?: true
@@ -83,6 +98,45 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 }
             }
         }
+    }
+
+    private fun buildMediaItem(uri: Uri, title: String): MediaItem {
+        val builder = MediaItem.Builder().setUri(uri)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
+        savedState.get<String>("subtitleUri")?.let { subtitle ->
+            builder.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle))
+                .setMimeType(MimeTypes.APPLICATION_SUBRIP).setId("external-srt")
+                .setLabel(savedState.get<String>("subtitleName") ?: "SRT")
+                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()))
+        }
+        return builder.build()
+    }
+
+    fun selectTrack(group: Tracks.Group, index: Int) {
+        val current = player ?: return
+        if (!group.isTrackSupported(index)) return
+        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(group.type, false).clearOverridesOfType(group.type)
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index)).build()
+    }
+
+    fun setTrackType(type: Int, enabled: Boolean) {
+        val current = player ?: return
+        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(type).setTrackTypeDisabled(type, !enabled).build()
+    }
+
+    fun loadSubtitle(uri: Uri, name: String) {
+        savedState["subtitleUri"] = uri.toString()
+        savedState["subtitleName"] = name
+        val current = player ?: return
+        val media = current.currentMediaItem ?: return
+        val position = current.currentPosition
+        val playing = current.playWhenReady
+        setTrackType(C.TRACK_TYPE_TEXT, true)
+        current.setMediaItem(buildMediaItem(Uri.parse(currentUri), media.mediaMetadata.title.toString()), position)
+        current.prepare()
+        current.playWhenReady = playing
     }
 
     fun savePlaybackState() {

@@ -23,4 +23,14 @@
     <string name="gesture_volume_unavailable">Volume is controlled by the device</string>
     <string name="playback_speed_value">%1$sx</string>
     <string name="playback_speed_description">Playback speed: %1$s</string>
+    <string name="tracks">Tracks</string>
+    <string name="audio_tracks">Audio tracks</string>
+    <string name="subtitle_tracks">Subtitle tracks</string>
+    <string name="automatic_track">Automatic</string>
+    <string name="subtitles_off">Off</string>
+    <string name="no_tracks">No embedded tracks</string>
+    <string name="load_subtitle">Load subtitle file</string>
+    <string name="subtitle_error">Choose a readable .srt subtitle file.</string>
+    <string name="ok">OK</string>
 </resources>
+
