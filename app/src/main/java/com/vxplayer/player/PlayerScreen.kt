@@ -4,6 +4,10 @@ import android.net.Uri
 import android.content.Context
 import android.media.AudioManager
 import android.provider.Settings
+import android.os.Build
+import android.view.WindowManager
+import android.content.pm.ActivityInfo
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -48,6 +52,13 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     val host = activity as? MainActivity
     val inPip = host?.pipMode == true
     val orientation = rememberOrientationController()
+    LaunchedEffect(model.videoSize, orientation.locked, inPip) {
+        val size = model.videoSize
+        if (!orientation.locked && !inPip && size.width > 0 && size.height > 0) {
+            orientation.requested = if (size.width * size.pixelWidthHeightRatio >= size.height)
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
+    }
     val context = LocalContext.current
     val audio = remember(context) { context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val window = activity?.window
@@ -108,9 +119,18 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         val window = activity?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
         val previousBehavior = controller?.systemBarsBehavior
+        WindowCompat.setDecorFitsSystemWindows(requireNotNull(window), false)
+        val originalCutout = if (Build.VERSION.SDK_INT >= 28) window.attributes.layoutInDisplayCutoutMode else 0
+        if (Build.VERSION.SDK_INT >= 28) window.attributes = window.attributes.apply {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        val originalContrast = if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced else false
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller?.hide(WindowInsetsCompat.Type.systemBars())
         onDispose {
+            if (Build.VERSION.SDK_INT >= 28) window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = originalCutout }
+            if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = originalContrast
             controller?.show(WindowInsetsCompat.Type.systemBars())
             if (previousBehavior != null) controller?.systemBarsBehavior = previousBehavior
         }
@@ -121,6 +141,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 GesturePlayerView(context).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(-1, -1)
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     useController = true
                     controllerAutoShow = false
                     setShowNextButton(false)
@@ -135,8 +157,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 it.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
                     window?.let { currentWindow ->
                         val controller = WindowCompat.getInsetsController(currentWindow, currentWindow.decorView)
-                        if (visibility == android.view.View.VISIBLE && !inPip) controller.show(WindowInsetsCompat.Type.systemBars())
-                        else controller.hide(WindowInsetsCompat.Type.systemBars())
+                        controller.hide(WindowInsetsCompat.Type.systemBars())
                     }
                 })
                 it.keepScreenOn = model.isPlaying

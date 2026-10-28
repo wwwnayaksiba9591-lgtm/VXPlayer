@@ -7,6 +7,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +33,8 @@ import kotlinx.coroutines.yield
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
+    var videoSize by mutableStateOf(VideoSize.UNKNOWN)
+        private set
     var tracks by mutableStateOf(Tracks.EMPTY)
         private set
     var choosingSubtitle by mutableStateOf(false)
@@ -88,6 +91,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     trackSelectionParameters = TrackSelectionParameters.fromBundle(it)
                 }
                 addListener(object : Player.Listener {
+                    override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size }
                     override fun onTracksChanged(value: Tracks) {
                         tracks = value
                         if (savedState.get<Boolean>("selectExternal") == true) {
