@@ -237,6 +237,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         return true
     }
 
+    fun seekTo(position: Long) {
+        val current = player ?: return
+        if (!current.isCurrentMediaItemSeekable) return
+        current.seekTo(position.coerceIn(0L, if (current.duration > 0) current.duration else Long.MAX_VALUE))
+        savePlaybackState()
+    }
+
     fun stop() {
         advance?.cancel()
         advance = null
