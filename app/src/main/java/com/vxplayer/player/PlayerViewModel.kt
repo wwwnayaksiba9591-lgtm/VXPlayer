@@ -13,6 +13,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -46,6 +47,14 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     var notice by mutableStateOf<String?>(null)
         private set
     private val preferences = application.getSharedPreferences("vxplayer", 0)
+    var subtitleDelayMs by mutableIntStateOf(0)
+        private set
+    var hasExternalSrt by mutableStateOf(false)
+        private set
+    private var preparedSubtitle: Uri? = null
+    private var preparedSource: String? = null
+    private var preparedDelay = 0
+    private var subtitleWork: Job? = null
     var subtitleSize by mutableStateOf(preferences.getFloat("subtitleSize", 20f))
         private set
     var subtitleColor by mutableStateOf(preferences.getInt("subtitleColor", android.graphics.Color.WHITE))
@@ -108,6 +117,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["activeUri"] = selectedUri
         savedState["activeTitle"] = activeTitle
         currentUri = selectedUri
+        subtitleDelayMs = preferences.getInt(subtitleDelayKey(selectedUri), 0).coerceIn(-60_000, 60_000)
         audioEnhancer.newVideo(selectedUri)
         videoEnhancer.newVideo(selectedUri)
         starting = viewModelScope.launch {
@@ -141,6 +151,17 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     savedState["selectExternal"] = false
                     rememberChoice { it.copy(externalUri = null, externalName = null, textId = null, textLanguage = null) }
                     notice = "Saved subtitle is unavailable; playing without it."
+                }
+            }
+            hasExternalSrt = savedState.get<String>("subtitleUri") != null
+            savedState.get<String>("subtitleUri")?.let { source ->
+                try {
+                    preparedSubtitle = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), subtitleDelayMs, preparedSubtitle) }
+                    preparedSource = source; preparedDelay = subtitleDelayMs
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    savedState.remove<String>("subtitleUri"); hasExternalSrt = false
+                    notice = "External subtitle could not be loaded. Playing without subtitles."
                 }
             }
             player = ExoPlayer.Builder(getApplication<Application>()).build().apply {
@@ -218,6 +239,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 playWhenReady = savedState.get<Boolean>("playWhenReady") ?: true
                 configureEnhancement(this, force = true)
                 prepare()
+            }
+            val originalSubtitle = savedState.get<String>("subtitleUri")
+            if (originalSubtitle != null && (preparedSource != originalSubtitle || preparedDelay != subtitleDelayMs ||
+                    player?.currentMediaItem?.localConfiguration?.subtitleConfigurations?.firstOrNull()?.uri != preparedSubtitle)) {
+                reloadExternalSubtitle(select = savedState.get<Boolean>("selectExternal") == true)
             }
             checkpoint = viewModelScope.launch {
                 while (true) {
@@ -375,6 +401,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState.remove<String>("subtitleUri")
         savedState.remove<String>("subtitleName")
         savedState.remove<Boolean>("selectExternal")
+        hasExternalSrt = false; preparedSubtitle = null; preparedSource = null
         tracks = Tracks.EMPTY
         activeUri = next.uri
         activeTitle = next.title
@@ -385,7 +412,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         val builder = MediaItem.Builder().setUri(uri)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
         savedState.get<String>("subtitleUri")?.let { subtitle ->
-            builder.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle))
+            val actual = if (preparedSource == subtitle && preparedDelay == subtitleDelayMs) preparedSubtitle ?: Uri.parse(subtitle) else Uri.parse(subtitle)
+            builder.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(actual)
                 .setMimeType(MimeTypes.APPLICATION_SUBRIP).setId("external-srt")
                 .setLabel(savedState.get<String>("subtitleName") ?: "SRT")
                 .setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()))
@@ -417,6 +445,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun loadSubtitle(uri: Uri, name: String) {
         savedState["subtitleUri"] = uri.toString()
         savedState["subtitleName"] = name
+        hasExternalSrt = true
         textRestored = true
         rememberChoice { it.copy(externalUri = uri.toString(), externalName = name, textDisabled = false, textId = "external-srt", textLanguage = null) }
         val parameters = player?.trackSelectionParameters ?: savedState.get<Bundle>("trackParameters")?.let {
@@ -426,15 +455,38 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
         savedState["trackParameters"] = updated.toBundle()
         savedState["selectExternal"] = true
-        val current = player ?: return
-        val media = current.currentMediaItem ?: return
-        val position = current.currentPosition
-        val playing = current.playWhenReady
-        current.trackSelectionParameters = updated
-        savedState["selectExternal"] = true
-        current.setMediaItem(buildMediaItem(Uri.parse(currentUri), media.mediaMetadata.title.toString()), position)
-        current.prepare()
-        current.playWhenReady = playing
+        player?.trackSelectionParameters = updated
+        reloadExternalSubtitle(select = true)
+    }
+
+    fun changeSubtitleDelay(delta: Int, reset: Boolean = false) {
+        if (!hasExternalSrt) { notice = "Delay applies only to an external SRT file."; return }
+        subtitleDelayMs = if (reset) 0 else (subtitleDelayMs + delta).coerceIn(-60_000, 60_000)
+        currentUri?.let { preferences.edit().putInt(subtitleDelayKey(it), subtitleDelayMs).apply() }
+        reloadExternalSubtitle(select = false)
+    }
+
+    private fun reloadExternalSubtitle(select: Boolean) {
+        subtitleWork?.cancel()
+        val source = savedState.get<String>("subtitleUri") ?: return
+        val video = currentUri ?: return
+        val offset = subtitleDelayMs
+        subtitleWork = viewModelScope.launch {
+            delay(120)
+            try {
+                val cached = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), offset, preparedSubtitle) }
+                if (video != currentUri) return@launch
+                preparedSubtitle = cached; preparedSource = source; preparedDelay = offset
+                val current = player ?: return@launch
+                val position = current.currentPosition; val playing = current.playWhenReady
+                val externalSelected = current.currentTracks.groups.any { group -> group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { group.isTrackSelected(it) && group.getTrackFormat(it).id?.contains("external-srt") == true } }
+                savedState["selectExternal"] = select || externalSelected
+                current.setMediaItem(buildMediaItem(Uri.parse(video), activeTitle), position)
+                current.prepare(); current.playWhenReady = playing
+                notice = "External SRT delay: ${if (offset >= 0) "+" else ""}$offset ms"
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { notice = "Could not load external SRT. Check the file and its access permission." }
+        }
     }
 
     fun savePlaybackState() {
@@ -472,6 +524,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun stop() {
+        subtitleWork?.cancel(); subtitleWork = null
         rebuilding?.cancel(); rebuilding = null
         effectsConfigured = false
         repaint?.cancel(); repaint = null

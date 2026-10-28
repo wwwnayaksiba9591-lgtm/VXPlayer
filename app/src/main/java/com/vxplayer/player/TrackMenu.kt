@@ -76,6 +76,14 @@ fun TrackMenu(model: PlayerViewModel) {
             }
             DropdownMenuItem(text = { Text(stringResource(R.string.load_subtitle)) },
                 onClick = { expanded = false; model.choosingSubtitle = true; picker.launch(arrayOf("*/*")) })
+            HorizontalDivider()
+            Text("External SRT delay: ${model.subtitleDelayMs} ms", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                TextButton(onClick = { model.changeSubtitleDelay(-100) }, enabled = model.hasExternalSrt) { Text("−100 ms") }
+                TextButton(onClick = { model.changeSubtitleDelay(0, reset = true) }, enabled = model.hasExternalSrt) { Text("Reset") }
+                TextButton(onClick = { model.changeSubtitleDelay(100) }, enabled = model.hasExternalSrt) { Text("+100 ms") }
+            }
+            Text("External SRT only. Positive delay shows captions later. Embedded subtitles cannot be shifted.", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
         }
         }
     }
