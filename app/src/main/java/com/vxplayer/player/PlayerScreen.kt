@@ -171,6 +171,12 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         }
     }
     LaunchedEffect(window, brightness) { if (window != null && brightness >= 0) window.attributes = window.attributes.apply { screenBrightness = brightness } }
+    if (model.audioEnhancer.warning) AlertDialog(
+        onDismissRequest = { model.audioEnhancer.acknowledgeWarning(false) },
+        title = { Text("High volume boost") },
+        text = { Text("Above 150% can distort sound and may damage speakers or hearing. Keep listening levels low.") },
+        confirmButton = { TextButton(onClick = { model.audioEnhancer.acknowledgeWarning(true) }) { Text("Enable boost") } },
+        dismissButton = { TextButton(onClick = { model.audioEnhancer.acknowledgeWarning(false) }) { Text("Cancel") } })
     val visible = controls && !locked && !inPip
     CompositionLocalProvider(LocalContentColor provides Color.White) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -204,18 +210,14 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             view.onVerticalStart = { left ->
                 swiping = true; leftSwipe = left
                 swipeStart = if (left) brightness.takeIf { it >= 0 } ?: (Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128) / 255f)
-                    else audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
+                    else { model.audioEnhancer.syncSystemVolume(); model.audioEnhancer.percent.toFloat() }
             }
             view.onVertical = { fraction ->
                 if (leftSwipe) { brightness = (swipeStart + fraction).coerceIn(.01f, 1f); feedback("Brightness ${(brightness * 100).roundToInt()}%") }
                 else {
-                    val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    try {
-                        if (max > 0 && !audio.isVolumeFixed) {
-                            audio.setStreamVolume(AudioManager.STREAM_MUSIC, (swipeStart + fraction * max).roundToInt().coerceIn(0, max), 0)
-                            feedback("Volume ${(audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100f / max).roundToInt()}%")
-                        } else feedback("Volume controlled by device")
-                    } catch (_: SecurityException) { feedback("Volume controlled by device") }
+                    val limit = if (defaults.allowBoost && model.audioEnhancer.boostAvailable) defaults.maxBoost else 100
+                    model.audioEnhancer.request((swipeStart + fraction * limit).roundToInt())
+                    feedback(model.audioEnhancer.message ?: "Volume ${model.audioEnhancer.percent}%")
                 }
             }
             view.onHorizontalStart = { swiping = true; seekStart = model.player?.currentPosition ?: 0L }
@@ -286,7 +288,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             }
         }
         if (locked && unlockVisible && !inPip) TextButton(onClick = { locked = false; controls = true; unlockVisible = false; touch() }, modifier = Modifier.align(Alignment.CenterEnd).safeDrawingPadding().background(Color.Black.copy(alpha = .8f))) { Text("Unlock", color = Color.White) }
-        if (!inPip) indicator?.let { Text(it, color = Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(12.dp)).padding(16.dp)) }
+        if (!inPip) indicator?.let { Text(it, color = if (it.startsWith("Volume") && model.audioEnhancer.percent > 100) Color(0xFFFFC857) else Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(12.dp)).padding(16.dp)) }
         if (model.failed) Text("Could not play this video", color = Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black).padding(24.dp))
     }
     }

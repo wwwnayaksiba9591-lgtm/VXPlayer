@@ -41,6 +41,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Switch(settings.dynamicColor, onCheckedChange = { checked -> store.update { it.copy(dynamicColor = checked) } })
             }
             HorizontalDivider()
+            Text("Audio", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Allow volume boost above 100%", modifier = Modifier.weight(1f))
+                Switch(settings.allowBoost, onCheckedChange = { checked -> store.update { it.copy(allowBoost = checked) } })
+            }
+            SettingChoice("Max boost", "${settings.maxBoost}%", listOf("150%", "200%")) { label -> store.update { it.copy(maxBoost = label.removeSuffix("%").toInt()) } }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Keep boost between videos", modifier = Modifier.weight(1f))
+                Switch(settings.rememberBoost, onCheckedChange = { checked -> store.update { it.copy(rememberBoost = checked) } })
+            }
+            HorizontalDivider()
             OutlinedButton(onClick = { confirm = true }) { Text("Clear history and resume positions") }
             Text("Track preferences and playback defaults are kept.", style = MaterialTheme.typography.bodySmall)
             result?.let { Text(it, color = MaterialTheme.colorScheme.primary) }

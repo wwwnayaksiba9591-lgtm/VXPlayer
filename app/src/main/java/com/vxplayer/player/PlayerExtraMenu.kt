@@ -22,13 +22,16 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var audioSheet by remember { mutableStateOf(false) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (!model.setBackground(true)) message = "Background playback could not start."
     }
+    if (audioSheet) AudioEnhanceSheet(model) { audioSheet = false }
     if (show) ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
     Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
     DropdownMenuItem(text = { Text("Speed · ${model.speed}×") }, onClick = onSpeed)
+    DropdownMenuItem(text = { Text("Audio enhance · ${model.audioEnhancer.percent}%") }, onClick = { onDismiss(); audioSheet = true })
     DropdownMenuItem(text = { Text(if (orientationLocked) "Unlock orientation" else "Lock orientation") }, onClick = onOrientation)
     DropdownMenuItem(text = { Text("Sleep timer: ${model.sleepLabel}") }, onClick = { dialog = "sleep" })
     DropdownMenuItem(text = { Text(if (model.backgroundEnabled) "Stop background/audio-only play" else "Background/audio-only play") }, onClick = {

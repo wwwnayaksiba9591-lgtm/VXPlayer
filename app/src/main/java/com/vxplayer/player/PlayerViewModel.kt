@@ -35,6 +35,7 @@ import kotlinx.coroutines.yield
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
+    val audioEnhancer = AudioEnhancer(application)
     var notice by mutableStateOf<String?>(null)
         private set
     private val preferences = application.getSharedPreferences("vxplayer", 0)
@@ -100,6 +101,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["activeUri"] = selectedUri
         savedState["activeTitle"] = activeTitle
         currentUri = selectedUri
+        audioEnhancer.newVideo(selectedUri)
         starting = viewModelScope.launch {
             if (playlist.isEmpty()) {
                 playlist = try { withContext(Dispatchers.IO) { loadFolderPlaylist(getApplication(), folder) } }
@@ -145,6 +147,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build()
                 if (choice?.textDisabled == true) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
+                    override fun onAudioSessionIdChanged(audioSessionId: Int) { audioEnhancer.attach(audioSessionId) }
                     override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size }
                     override fun onTracksChanged(value: Tracks) {
                         tracks = value
@@ -207,6 +210,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             monitor = viewModelScope.launch {
                 while (true) {
                     delay(100)
+                    audioEnhancer.syncSystemVolume()
                     val current = player ?: break
                     val end = bMs
                     if (aMs != null && end != null && current.isPlaying && current.currentPosition >= end) current.seekTo(requireNotNull(aMs))
@@ -379,6 +383,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun stop() {
+        audioEnhancer.release()
         monitor?.cancel(); monitor = null
         advance?.cancel()
         advance = null
