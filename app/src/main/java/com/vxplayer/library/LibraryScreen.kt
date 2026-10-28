@@ -18,6 +18,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -44,6 +48,7 @@ private fun permissions() = when {
     else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryViewModel = viewModel()) {
     val context = LocalContext.current
@@ -53,6 +58,13 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
     var requested by rememberSaveable { mutableStateOf(false) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var selectedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    val preferences = remember(context) { context.getSharedPreferences("vxplayer", 0) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var search by rememberSaveable { mutableStateOf(false) }
+    var grid by remember { mutableStateOf(preferences.getBoolean("grid", false)) }
+    var sort by remember { mutableStateOf(runCatching { LibrarySort.valueOf(preferences.getString("sort", "Name")!!) }.getOrDefault(LibrarySort.Name)) }
+    var descending by remember { mutableStateOf(preferences.getBoolean("descending", false)) }
+    var sortOpen by remember { mutableStateOf(false) }
     val folderScroll = rememberLazyListState()
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
@@ -72,25 +84,41 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
     }
     BackHandler(selectedFolder != null) { selectedFolder = null; tab = 0 }
     val folder = state.folders.firstOrNull { it.key == selectedFolder }
+    val folders = orderLibrary(state.folders.filter { it.name.contains(query, true) || it.videos.any { video -> video.title.contains(query, true) } },
+        sort, descending, { it.name }, { it.videos.maxOfOrNull { video -> video.dateAdded } ?: 0L },
+        { it.videos.sumOf { video -> video.sizeBytes } }, { it.videos.sumOf { video -> video.durationMs } })
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (selectedFolder != null) TextButton(onClick = { selectedFolder = null; tab = 0 }) { Text(stringResource(R.string.back_to_library)) }
                 Text(folder?.name ?: "VXPlayer", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 TextButton(onClick = { model.refresh(access()) }) { Text(stringResource(R.string.refresh)) }
+                TextButton(onClick = { search = !search; if (!search) query = "" }) { Text("Search") }
+            }
+            if (search) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Box {
+                    TextButton(onClick = { sortOpen = true }) { Text("Sort: $sort") }
+                    DropdownMenu(sortOpen, onDismissRequest = { sortOpen = false }) {
+                        LibrarySort.entries.forEach { value -> DropdownMenuItem(text = { Text(value.name) }, onClick = { sort = value; preferences.edit().putString("sort", value.name).apply(); sortOpen = false }) }
+                        DropdownMenuItem(text = { Text(if (descending) "Descending ✓" else "Ascending ✓") }, onClick = { descending = !descending; preferences.edit().putBoolean("descending", descending).apply(); sortOpen = false })
+                    }
+                }
+                TextButton(onClick = { grid = !grid; preferences.edit().putBoolean("grid", grid).apply() }) { Text(if (grid) "List" else "Grid") }
             }
             if (selectedFolder == null) TabRow(selectedTabIndex = tab) {
                 listOf(R.string.folders_tab, R.string.videos_tab, R.string.recently_played).forEachIndexed { index, label ->
                     Tab(selected = tab == index, onClick = { tab = index }, text = { Text(stringResource(label)) })
                 }
             }
+            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { model.refresh(access()) }, modifier = Modifier.weight(1f)) {
             when {
                 !allowed -> Column(Modifier.padding(24.dp)) {
                     Text(stringResource(R.string.permission_explanation))
                     Button(onClick = { picker.launch(permissions()) }) { Text(stringResource(R.string.allow_videos)) }
                     TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }) { Text(stringResource(R.string.settings)) }
                 }
-                state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                state.loading && state.folders.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 state.failed -> Text(stringResource(R.string.scan_failed), Modifier.padding(24.dp))
                 else -> {
                     if (Build.VERSION.SDK_INT >= 34 && context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
@@ -99,7 +127,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
                     if (selectedFolder == null && tab == 0) {
                         LazyColumn(state = folderScroll, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (state.folders.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
-                            items(state.folders, key = { it.key }) { group ->
+                            items(folders, key = { it.key }) { group ->
                                 Card(onClick = { selectedFolder = group.key }, modifier = Modifier.fillMaxWidth()) {
                                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         FolderIcon()
@@ -112,17 +140,37 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
                             }
                         }
                     } else {
-                        val videos = if (selectedFolder != null) folder?.videos.orEmpty() else if (tab == 2) state.recentlyPlayed else state.folders.flatMap { it.videos }
+                        val baseVideos = if (selectedFolder != null) folder?.videos.orEmpty() else if (tab == 2) state.recentlyPlayed else state.folders.flatMap { it.videos }
+                        val filtered = baseVideos.filter { video -> video.title.contains(query, true) || state.folders.any { it.key == video.folderKey && it.name.contains(query, true) } }
+                        val videos = if (tab == 2 && selectedFolder == null) filtered else orderLibrary(filtered, sort, descending, { it.title }, { it.dateAdded }, { it.sizeBytes }, { it.durationMs })
+                        if (grid) LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            gridItems(videos, key = { it.uri.toString() }) { video ->
+                                Card(onClick = { onVideoClick(video, video.folderKey) }) {
+                                    VideoThumbnail(video, Modifier.fillMaxWidth())
+                                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                            Text("${Formatter.formatShortFileSize(context, video.sizeBytes)} · ${video.width} × ${video.height}", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                        VideoActions(video, { onVideoClick(video, video.folderKey) }, { model.refresh(access()) })
+                                    }
+                                }
+                            }
+                        } else
                         LazyColumn(state = if (selectedFolder != null) detailScroll else if (tab == 2) recentScroll else videosScroll,
                             contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (videos.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
-                            items(videos, key = { it.uri.toString() }) { video -> VideoRow(video, onClick = { onVideoClick(video, video.folderKey) }) }
+                            items(videos, key = { it.uri.toString() }) { video -> VideoRow(video, onClick = { onVideoClick(video, video.folderKey) }) {
+                                VideoActions(video, { onVideoClick(video, video.folderKey) }, { model.refresh(access()) })
+                            } }
                         }
                     }
                 }
             }
         }
     }
+}
+
 }
 
 @Composable

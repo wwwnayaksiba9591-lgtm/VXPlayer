@@ -33,7 +33,7 @@ class VideoLibraryViewModel(application: Application) : AndroidViewModel(applica
 
     fun refresh(hasAccess: Boolean) {
         scan?.cancel()
-        mutableState.value = LibraryState(loading = hasAccess)
+        mutableState.value = if (hasAccess) mutableState.value.copy(loading = true) else LibraryState()
         if (!hasAccess) return
         scan = viewModelScope.launch {
             try {
