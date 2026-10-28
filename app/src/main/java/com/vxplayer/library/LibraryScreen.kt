@@ -74,6 +74,12 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     var descending by remember { mutableStateOf(preferences.getBoolean("descending", false)) }
     var sortOpen by remember { mutableStateOf(false) }
     var appMenu by remember { mutableStateOf(false) }
+    var openUrl by rememberSaveable { mutableStateOf(false) }
+    if (openUrl) OpenUrlSheet(onDismiss = { openUrl = false }, onPlay = { url, title, type ->
+        openUrl = false
+        preferences.edit().putString("streamType:$url", type).apply()
+        onVideoClick(Video(Uri.parse(url), title, 0L, 0L), "")
+    })
     val folderScroll = rememberLazyListState()
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
@@ -108,6 +114,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
                         DropdownMenuItem(text = { Text("Settings") }, onClick = { appMenu = false; onSettings() })
+                        DropdownMenuItem(text = { Text("Open URL") }, onClick = { appMenu = false; openUrl = true })
                         DropdownMenuItem(text = { Text("Rescan library") }, onClick = { appMenu = false; model.refresh(access()) })
                     }
                 }

@@ -96,6 +96,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         private set
     var failed by mutableStateOf(false)
         private set
+    var failureMessage by mutableStateOf("Could not play this video.")
+        private set
+    fun retryPlayback() {
+        failed = false
+        player?.prepare()
+        player?.play()
+    }
     var isPlaying by mutableStateOf(false)
         private set
     var speed by mutableStateOf(savedState.get<Float>("speed") ?: AppSettings.get(application).state.value.speed)
@@ -203,7 +210,14 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                             enhanceOn = false
                             effectsConfigured = false
                             rebuildEnhancementPlayer(videoEnhancer.reason)
-                        } else failed = true
+                        } else {
+                            failureMessage = if (selectedUri.startsWith("http", true)) when (error.errorCode) {
+                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Could not connect. Check your connection and retry."
+                                PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The server rejected this link. It may have expired or need authentication."
+                                else -> "Cannot play this stream. Check the URL, stream type, and media format."
+                            } else "Could not play this video. The file may be unavailable or unsupported."
+                            failed = true
+                        }
                     }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@PlayerViewModel.isPlaying = playing
@@ -411,6 +425,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private fun buildMediaItem(uri: Uri, title: String): MediaItem {
         val builder = MediaItem.Builder().setUri(uri)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
+        if (uri.scheme.equals("http", true) || uri.scheme.equals("https", true)) {
+            val type = preferences.getString("streamType:$uri", "Auto")
+            when (type) {
+                "HLS" -> builder.setMimeType(MimeTypes.APPLICATION_M3U8)
+                "DASH" -> builder.setMimeType(MimeTypes.APPLICATION_MPD)
+            }
+        }
         savedState.get<String>("subtitleUri")?.let { subtitle ->
             val actual = if (preparedSource == subtitle && preparedDelay == subtitleDelayMs) preparedSubtitle ?: Uri.parse(subtitle) else Uri.parse(subtitle)
             builder.setSubtitleConfigurations(listOf(MediaItem.SubtitleConfiguration.Builder(actual)

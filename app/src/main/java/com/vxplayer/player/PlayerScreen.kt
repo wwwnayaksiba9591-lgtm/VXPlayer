@@ -294,7 +294,10 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         }
         if (locked && unlockVisible && !inPip) TextButton(onClick = { locked = false; controls = true; unlockVisible = false; touch() }, modifier = Modifier.align(Alignment.CenterEnd).safeDrawingPadding().background(Color.Black.copy(alpha = .8f))) { Text("Unlock", color = Color.White) }
         if (!inPip) indicator?.let { Text(it, color = if (it.startsWith("Volume") && model.audioEnhancer.percent > 100) Color(0xFFFFC857) else Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(12.dp)).padding(16.dp)) }
-        if (model.failed) Text("Could not play this video", color = Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black).padding(24.dp))
+        if (model.failed) Column(Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .85f)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(model.failureMessage, color = Color.White)
+            TextButton(onClick = { model.retryPlayback() }) { Text("Retry", color = Color.White) }
+        }
     }
     }
 }

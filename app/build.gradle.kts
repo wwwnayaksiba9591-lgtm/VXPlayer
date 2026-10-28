@@ -38,6 +38,8 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.navigation.compose)
     implementation(libs.media3.exoplayer)
+    implementation(libs.media3.hls)
+    implementation(libs.media3.dash)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
     implementation(libs.media3.effect)
