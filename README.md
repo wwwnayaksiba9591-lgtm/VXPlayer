@@ -160,3 +160,9 @@ These checks remain unverified until a device or emulator is available. Unit tes
 - [ ] Upgrade an older installation with resume data and exercise the complete Room migration chain. Verify metadata/history/track preferences after restart.
 - [ ] Install a locally signed release APK and repeat fullscreen, playback, permission, PiP, service notification, subtitle, and file-action smoke tests.
 - [ ] Verify original adaptive/fallback icon, VXPlayer name/version, and a clean debug/release build and unit-test run.
+
+## Continuation: features 6–11
+
+- Feature 6: external SRT delay is remembered per video, in 100 ms steps (up to +/-60 seconds). Positive values show subtitles later. Timing is shifted in a private cache on a background thread; the original document is unchanged. Embedded subtitle delay is unsupported. SRT files are limited to 4 MiB.
+- Feature 7 deferred: the background service borrows the navigation-scoped player. Leaving PlayerScreen releases that engine. A reliable library mini player requires service-owned playback and controller reconnection; retaining a stale player would risk lifecycle regressions.
+
