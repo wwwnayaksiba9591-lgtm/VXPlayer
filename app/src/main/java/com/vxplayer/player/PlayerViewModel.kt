@@ -35,6 +35,8 @@ import kotlinx.coroutines.yield
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
+    var notice by mutableStateOf<String?>(null)
+        private set
     private val preferences = application.getSharedPreferences("vxplayer", 0)
     var subtitleSize by mutableStateOf(preferences.getFloat("subtitleSize", 20f))
         private set
@@ -90,6 +92,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun start(uri: Uri, title: String, folder: String = savedState.get<String>("folder").orEmpty()) {
         if (player != null || starting?.isActive == true) return
         failed = false
+        notice = null
         savedState["folder"] = folder
         val selectedUri = activeUri ?: uri.toString()
         activeUri = selectedUri
@@ -118,6 +121,18 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     savedState["subtitleUri"] = selected.externalUri; savedState["subtitleName"] = selected.externalName
                 }
             }
+            savedState.get<String>("subtitleUri")?.let { subtitle ->
+                val readable = withContext(Dispatchers.IO) {
+                    try { getApplication<Application>().contentResolver.openAssetFileDescriptor(Uri.parse(subtitle), "r")?.use { true } ?: false }
+                    catch (_: Exception) { false }
+                }
+                if (!readable) {
+                    savedState.remove<String>("subtitleUri"); savedState.remove<String>("subtitleName")
+                    savedState["selectExternal"] = false
+                    rememberChoice { it.copy(externalUri = null, externalName = null, textId = null, textLanguage = null) }
+                    notice = "Saved subtitle is unavailable; playing without it."
+                }
+            }
             player = ExoPlayer.Builder(getApplication<Application>()).build().apply {
                 setWakeMode(C.WAKE_MODE_LOCAL)
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
@@ -126,6 +141,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 savedState.get<Bundle>("trackParameters")?.let {
                     trackSelectionParameters = TrackSelectionParameters.fromBundle(it)
                 }
+                // Audio-only is an explicit live-session mode, never a restored video default.
+                trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build()
                 if (choice?.textDisabled == true) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size }

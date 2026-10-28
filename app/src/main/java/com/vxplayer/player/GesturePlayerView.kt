@@ -18,7 +18,7 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
     var onVertical: (Float) -> Unit = {}
     var onHorizontalStart: () -> Unit = {}
     var onHorizontal: (Float) -> Unit = {}
-    var onGestureEnd: () -> Unit = {}
+    var onGestureEnd: (cancelled: Boolean) -> Unit = {}
     var onZoom: (Float) -> Unit = {}
     var onHold: (Boolean) -> Unit = {}
     private var axis = 0
@@ -54,18 +54,18 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
         if (!locked) scale.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) { cancelGesture(); scaling = true }
         if (!scaling) detector.onTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) finish()
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) finish(event.actionMasked == MotionEvent.ACTION_CANCEL)
         return true
     }
-    private fun finish() {
+    private fun finish(cancelled: Boolean = false) {
         if (holding) { holding = false; onHold(false) }
-        if (axis != 0) onGestureEnd()
+        if (axis != 0) onGestureEnd(cancelled)
         axis = 0
     }
     private fun cancelGesture() {
         val now = SystemClock.uptimeMillis()
         val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
-        detector.onTouchEvent(event); event.recycle(); finish()
+        detector.onTouchEvent(event); event.recycle(); finish(true)
     }
     override fun onDetachedFromWindow() { cancelGesture(); super.onDetachedFromWindow() }
 }

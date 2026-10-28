@@ -86,6 +86,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     var remaining by rememberSaveable { mutableStateOf(false) }
     fun feedback(text: String) { indicator = text; indicatorTick++ }
     fun touch() { interaction++ }
+    LaunchedEffect(model.notice) { model.notice?.let { feedback(it) } }
     BackHandler(locked && !inPip) { unlockVisible = true; touch() }
     LaunchedEffect(model.player) {
         while (true) {
@@ -209,7 +210,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 val delta = (target - seekStart) / 1000
                 feedback("${formatDuration(target)} (${if (delta >= 0) "+" else ""}$delta s)")
             }
-            view.onGestureEnd = { seekTarget?.let { model.seekTo(it) }; seekTarget = null; swiping = false; touch() }
+            view.onGestureEnd = { cancelled -> if (!cancelled) seekTarget?.let { model.seekTo(it) }; seekTarget = null; swiping = false; touch() }
             view.onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 4f); feedback("Zoom ${(zoom * 100).roundToInt()}%") }
             view.onHold = { held ->
                 if (held && heldSpeed == null) { heldSpeed = model.speed; model.changeSpeed(2f); feedback("2× while held") }
