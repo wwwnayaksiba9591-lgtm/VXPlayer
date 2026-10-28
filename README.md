@@ -30,6 +30,61 @@ Outputs:
 
 Release minification and shrinking are disabled. Release distribution needs your own signing key. App version is `1.1.0` (code `2`). Each redesign part is built, unit-tested, and committed separately.
 
+## Latest five-part theme, GUI, audio, and enhance update
+
+This pass follows the final five-part plan in the request. The earlier 13-feature advanced wishlist remains separate; this update does not add URL streaming, casting, private folders, backups, bookmarks, or the other standalone wishlist items. No network permissions were added. The only additional app permission is the normal `MODIFY_AUDIO_SETTINGS` permission for session audio effects.
+
+- **Theme:** System is the default for new settings; saved choices are retained. Light and Dark use full blue/neutral Material 3 palettes with contrast-tested text roles. Android 12+ has a separate Material You dynamic-color switch; earlier devices use the static palette. The player always uses black, white controls, and a dark palette for its sheets. System-bar icon contrast follows the active screen.
+- **GUI:** shared typography, 4/8/12/16/24 dp spacing, 12–16 dp cards, consistent Material Icons, 48 dp minimum icon targets, press feedback, tab/navigation fades, larger thumbnails, resume card, gradient player scrims, and playback/track/audio/enhance bottom sheets. Existing playback and file-action behavior remains available.
+- **Volume:** 0–100% maps to the actual discrete system media-volume steps; above 100% applies session-bound `LoudnessEnhancer` gain up to the configured 150% or 200% cap. The conversion is `2000 * log10(percent / 100)` millibels, so 200% requests approximately +6.02 dB amplitude gain. The percentage describes the requested processing level, not a measured sound-pressure or perceived-loudness guarantee. Platform compression and hardware can limit the audible result.
+- **Volume safety/lifecycle:** levels above 100% have warning-colored indicators. The first request above 150% requires explicit acknowledgement before that gain is applied. Boost is process-session state, resets above-100% gain on a different video by default, and can optionally be retained between videos. Hardware volume changes remove active gain and resynchronize the indicator. Effects are released with the player and recreated when its audio session changes. Failed effect operations are checked, disabled, and released rather than reporting unsupported gain as active.
+- **Audio enhance:** BassBoost is exposed only when supported. Android 9+ Night mode uses supported DynamicsProcessing compression/limiting to reduce loud peaks without makeup gain. Unsupported effects show an unavailable state instead of failing playback. Night mode is not hearing protection; boosted playback can still distort or be unsafe.
+- **Video enhance:** a single Media3 1.6.1 `GlEffect` applies brightness, contrast, saturation, convolution-style sharpness/softening, and warmth. Presets are Original, Vivid, Cinema, Soft, Sharp, and Night, plus custom sliders and per-slider resets. Master off compares the original without discarding the chosen values. A Remember enhance settings preference controls persistence.
+- **Enhance boundaries:** Original playback keeps the ordinary ExoPlayer output path. Initial activation may briefly rebuild the player while retaining position, paused state, speed, and track state; subsequent live slider changes update shader uniforms without repeatedly rebuilding the pipeline. Paused preview redraw is debounced. Enhancement is bypassed in PiP/audio-only mode and restored afterward. HDR, protected video, and unsupported GPU/decoder paths bypass enhancement. A processing failure hides enhancement for that video path and attempts normal playback recovery; a fault during hidden background playback pauses safely rather than starting a new hidden foreground-service session. All GL resources belong to Media3 and are released with its pipeline.
+
+### Latest Part 1 — themes
+
+- [ ] On every library tab, folder screen, Settings, dialogs, search field, file menu, and permission/empty/error state, switch System/Light/Dark and check readable text/icons/surfaces immediately without restarting.
+- [ ] On Android 12+, enable dynamic color under both light and dark system appearance. Change wallpaper and reopen/resume the app; inspect menus, cards, progress lines, and switch/slider contrast. On older Android, confirm the static fallback and no unsupported switch.
+- [ ] Change system light/dark appearance while System is selected. Check status/navigation icon contrast outside the player and white icons on black when the player reveals system bars.
+- [ ] Open the player in every theme: video background must stay black, controls white, and sheets readable. Exit to a light library and verify bar icons restore correctly. Restart and verify settings persist.
+
+### Latest Part 2 — GUI
+
+- [ ] Inspect Folders/Videos/Recent, search and overflow actions, folder aggregates, rounded list/grid thumbnails, duration badges, resume progress, watched labels, and Resume last video behavior.
+- [ ] Verify Resume prefers the most recent unfinished checkpoint, falls back to replaying the latest item if all are complete, and is absent with no history.
+- [ ] Test 320 dp phones, tablets, portrait/landscape, RTL, and large system fonts. Text must wrap/ellipsize appropriately; icon targets must be at least 48 dp, and overflowed player actions remain reachable by scrolling.
+- [ ] Check press feedback, tab/navigation fades, controls fading, gradient scrims, large play/pause control, thick seek track, and rounded thumb. Lock and PiP must immediately remove touch targets.
+- [ ] Open speed, tracks, audio, and enhance sheets while playing/paused. Scroll long sheets at large fonts. Load/cancel subtitles and notification permission, then return; hidden controls must not discard the result callback.
+- [ ] Verify polished permission, loading, error, empty, and no-search-result states provide the appropriate action.
+
+### Latest Part 3 — boost and audio effects
+
+- [ ] At a low listening level, drag volume through 0–100% and check the system volume steps and displayed percentage agree. Then test 100–150% and confirm a warning-colored indicator.
+- [ ] Without prior acknowledgement, request 151–200%: verify the warning appears before applying above-150% gain. Cancel once; then accept. Repeat after rotation/reopening and confirm the one-time acknowledgement behavior.
+- [ ] Disable Allow volume boost, set the cap to 150%, then 200%, and test both swipe and Audio enhance slider. Reset audio. No control may exceed the selected policy or show unavailable gain as active.
+- [ ] Boost a video and move to another: above-100% gain resets by default. Enable Keep boost between videos and test again. Restart the process and confirm boost does not silently restore above 100%.
+- [ ] Change volume with hardware keys and notification/remote controls while boosted, including background-audio playback. Verify gain is removed and the indicator resynchronizes.
+- [ ] Switch embedded audio tracks/routes (speaker, wired/Bluetooth), rotate, enter/leave PiP, background, return, and exit. Check effect recreation, no duplicate audio, and no retained effects after player release.
+- [ ] Test unsupported/fixed-volume outputs and denied effect control: controls must report unavailability instead of crashing or displaying fictitious boost.
+- [ ] On supported devices, test bass strength and Night compression. On Android 7–8 and devices without DSP support, Night must be disabled with an explanation. Test their saved state on the next player/audio session.
+
+### Latest Part 4 — video enhancement
+
+- [ ] Test all six presets and each slider live while playing and paused; check brightness, contrast, saturation, detail/softening, and warmth. Reset individual sliders and reset to Original.
+- [ ] Compare master on/off without losing the selected values. Check the Enhance on indicator, presets/custom label, and Remember enhance settings on/off after reopening or changing videos.
+- [ ] Rotate landscape/portrait with enhancement on. Cycle Fit/Fill/Zoom/100%, pinch, seek, change speed, select tracks/subtitles, and switch playlist videos; resume state and subtitles must remain correct.
+- [ ] Enter PiP with enhancement active, resize/expand it, then return. Enable/disable audio-only mode. Verify enhancement bypasses those modes and restores its previous settings afterward.
+- [ ] Test HDR/protected/unsupported decoder paths and a device with limited GL support. The Enhance button must be hidden or disabled with a short reason, and normal playback must remain available.
+- [ ] Exercise processing failure recovery if reproducible: retain time/paused state, do not loop recovery, do not launch hidden audio after a failure, and release the old player/GL resources.
+
+### Latest Part 5 — regression/release
+
+- [ ] Run `.\.tools\check.ps1` and `.\gradlew.bat assembleRelease` with JDK 17. Install a locally signed release build and repeat theme, boost, enhancement, fullscreen, PiP, and background-audio checks.
+- [ ] Check existing folder/file-consent, playlist, resume, speed, sleep timer, A–B, subtitles/tracks, and history-clearing behavior. Existing regression checklist follows below.
+
+The automated checks do not exercise Android audio hardware, compile/run GLSL on a device GPU, validate real wallpaper palettes, or inspect screen layouts. Those remain device/emulator checks. No device was connected during this implementation.
+
 ## Behavior and boundaries
 
 - The player is a black, unpadded, edge-to-edge surface. It uses immersive transient system bars, short-edge cutout layout, and automatic orientation from Media3 video dimensions. Only overlay controls have safe-area padding. Fit intentionally retains black margins when screen and video aspect ratios differ; Fill stretches, Zoom crops, and 100% displays native pixel dimensions. Large-screen Android policies may override requested orientation.
@@ -41,7 +96,7 @@ Release minification and shrinking are disabled. Release distribution needs your
 - Subtitle delay controls are deferred: the pinned Media3 1.6.1 `SubtitleConfiguration` has no public subtitle timestamp offset API. Adding a no-op control or replacing the text renderer would be misleading or invasive. A future Media3 upgrade can add this separately. See the [pinned Media3 source](https://github.com/androidx/media/blob/1.6.1/libraries/common/src/main/java/androidx/media3/common/MediaItem.java).
 - Rename/delete use Android 11+ write/delete consent requests, Android 10 recoverable consent, or legacy write permission on Android 7–9. Cancellation and access failures leave the app usable. No broad all-files permission is requested.
 
-## Device-check checklist
+## Existing playback regression checklist
 
 These checks remain unverified until a device or emulator is available. Unit tests cover persistence queue ordering, clearing checkpoints, playlist boundaries, seek-preview clamping, sorting, and preferred track matching. They do not validate rendering, system consent dialogs, foreground-service notifications, or real Room migration execution.
 
@@ -94,7 +149,7 @@ These checks remain unverified until a device or emulator is available. Unit tes
 
 ### Part 6: theme and defaults
 
-- [ ] Verify default dark blue-grey surfaces, blue accent, rounded cards, readable metadata, and clean VXPlayer top bar. Inspect landscape, small screens, large fonts, and system theme mode.
+- [ ] Verify System (default), Light, and Dark appearance, blue accent, rounded cards, readable metadata, and clean VXPlayer top bar. Inspect landscape, small screens, large fonts, and system theme mode.
 - [ ] In Settings, select each speed/aspect/orientation default. Open a new video and confirm it uses the setting; temporary player changes must not overwrite defaults.
 - [ ] Turn auto-next off/on and finish a middle/final folder video. Confirm correct behavior without looping or losing checkpoints.
 - [ ] Test polished permission-denied, partial-access, loading, failed-scan, empty, and no-search-results states.

@@ -95,17 +95,19 @@ class AudioEnhancer(context: Context) {
         if (audio.isVolumeFixed) { message = "Volume is controlled by this device."; return }
         val maximum = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         try {
-            if (target <= 100) loudness?.enabled = false
+            if (target <= 100) disableGain()
             audio.setStreamVolume(AudioManager.STREAM_MUSIC, (target.coerceAtMost(100) * maximum / 100f).roundToInt(), 0)
             if (target > 100) {
-                loudness?.setTargetGain(loudnessGainMb(target))
-                loudness?.enabled = true
+                val effect = requireNotNull(loudness)
+                effect.setTargetGain(loudnessGainMb(target))
+                check(effect.setEnabled(true) == AudioEffect.SUCCESS && effect.enabled)
             }
             percent = if (target > 100) target else systemPercent()
             message = null
             SessionVolume.percent = percent; SessionVolume.expectedIndex = index()
         } catch (_: RuntimeException) {
-            try { loudness?.enabled = false } catch (_: RuntimeException) { }
+            try { loudness?.release() } catch (_: RuntimeException) { }
+            loudness = null
             boostAvailable = false; percent = systemPercent(); SessionVolume.percent = percent
             message = "Audio boost is unavailable on this audio output."
         }
@@ -113,7 +115,7 @@ class AudioEnhancer(context: Context) {
     fun syncSystemVolume() {
         val current = index()
         if (SessionVolume.expectedIndex != current) {
-            try { loudness?.enabled = false } catch (_: RuntimeException) { }
+            disableGain()
             percent = systemPercent(); SessionVolume.percent = percent; SessionVolume.expectedIndex = current
         }
         val defaults = AppSettings.get(app).state.value
@@ -123,12 +125,31 @@ class AudioEnhancer(context: Context) {
     fun updateBass(value: Int) {
         bassStrength = value.coerceIn(0, 1000)
         prefs.edit().putInt("bassStrength", bassStrength).apply()
-        try { bass?.setStrength(bassStrength.toShort()); bass?.enabled = bassStrength > 0 }
-        catch (_: RuntimeException) { bassAvailable = false; message = "Bass boost is unavailable on this output." }
+        try {
+            bass?.let { effect ->
+                effect.setStrength(bassStrength.toShort())
+                check(effect.setEnabled(bassStrength > 0) == AudioEffect.SUCCESS)
+            }
+        } catch (_: RuntimeException) {
+            try { bass?.release() } catch (_: RuntimeException) { }
+            bass = null; bassAvailable = false; message = "Bass boost is unavailable on this output."
+        }
     }
     fun updateNight(enabled: Boolean) {
         night = enabled; prefs.edit().putBoolean("nightAudio", enabled).apply()
-        try { dynamics?.enabled = enabled } catch (_: RuntimeException) { nightAvailable = false; message = "Night audio is unavailable on this output." }
+        try { dynamics?.let { check(it.setEnabled(enabled) == AudioEffect.SUCCESS) } }
+        catch (_: RuntimeException) {
+            try { dynamics?.release() } catch (_: RuntimeException) { }
+            dynamics = null; nightAvailable = false; message = "Night audio is unavailable on this output."
+        }
+    }
+    private fun disableGain() {
+        val effect = loudness ?: return
+        try { check(effect.setEnabled(false) == AudioEffect.SUCCESS && !effect.enabled) }
+        catch (_: RuntimeException) {
+            try { effect.release() } catch (_: RuntimeException) { }
+            loudness = null; boostAvailable = false
+        }
     }
     fun release() {
         listOfNotNull(loudness, bass, dynamics).forEach { try { it.release() } catch (_: RuntimeException) { } }
