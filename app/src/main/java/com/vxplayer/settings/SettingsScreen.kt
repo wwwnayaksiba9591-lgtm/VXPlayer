@@ -12,6 +12,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vxplayer.player.PlaybackPositionStore
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import com.vxplayer.ui.VXIconButton
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
@@ -23,7 +26,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = onBack) { Text("Back") }; Text("Settings", style = MaterialTheme.typography.headlineSmall) }
+            Row(verticalAlignment = Alignment.CenterVertically) { VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack); Text("Settings", style = MaterialTheme.typography.titleLarge) }
             SettingChoice("Default speed", "${settings.speed}x", listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f).map { "${it}x" }) { label -> store.update { it.copy(speed = label.removeSuffix("x").toFloat()) } }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Auto-play next", modifier = Modifier.weight(1f))

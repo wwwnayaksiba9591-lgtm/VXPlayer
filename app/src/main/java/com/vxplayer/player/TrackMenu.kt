@@ -6,6 +6,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Subtitles
+import com.vxplayer.ui.VXIconButton
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -21,6 +27,7 @@ import androidx.media3.ui.DefaultTrackNameProvider
 import com.vxplayer.R
 
 @androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackMenu(model: PlayerViewModel) {
     val context = LocalContext.current
@@ -44,8 +51,10 @@ fun TrackMenu(model: PlayerViewModel) {
         }
     }
     Box {
-        TextButton(onClick = { expanded = true }) { Text(stringResource(R.string.tracks), color = Color.White) }
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 400.dp)) {
+        VXIconButton(Icons.Default.Subtitles, "Audio and subtitles", { expanded = true })
+        if (expanded) ModalBottomSheet(onDismissRequest = { expanded = false }) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Text("Audio & subtitles", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
             listOf(C.TRACK_TYPE_AUDIO to R.string.audio_tracks, C.TRACK_TYPE_TEXT to R.string.subtitle_tracks).forEach { (type, label) ->
                 DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {}, enabled = false)
                 if (type == C.TRACK_TYPE_AUDIO) DropdownMenuItem(text = { Text(stringResource(R.string.automatic_track)) },
@@ -67,6 +76,7 @@ fun TrackMenu(model: PlayerViewModel) {
             }
             DropdownMenuItem(text = { Text(stringResource(R.string.load_subtitle)) },
                 onClick = { expanded = false; model.choosingSubtitle = true; picker.launch(arrayOf("*/*")) })
+        }
         }
     }
     if (error) AlertDialog(onDismissRequest = { error = false }, text = { Text(stringResource(R.string.subtitle_error)) },

@@ -8,6 +8,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
+import com.vxplayer.ui.VXShapes
+import com.vxplayer.ui.VXTypography
 
 val VXLightColors = lightColorScheme(
     primary = Color(0xFF145DA0), onPrimary = Color.White,
@@ -62,5 +64,5 @@ fun VXTheme(settings: PlaybackDefaults, playerMode: Boolean = false, content: @C
         dark -> VXDarkColors
         else -> VXLightColors
     }
-    MaterialTheme(colorScheme = colors, content = content)
+    MaterialTheme(colorScheme = colors, typography = VXTypography, shapes = VXShapes, content = content)
 }

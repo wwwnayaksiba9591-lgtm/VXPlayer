@@ -6,19 +6,30 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.vxplayer.library.formatDuration
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerExtraMenu(model: PlayerViewModel) {
+fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit, onSpeed: () -> Unit,
+    onOrientation: () -> Unit, orientationLocked: Boolean) {
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (!model.setBackground(true)) message = "Background playback could not start."
     }
+    if (show) ModalBottomSheet(onDismissRequest = onDismiss) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+    Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+    DropdownMenuItem(text = { Text("Speed · ${model.speed}×") }, onClick = onSpeed)
+    DropdownMenuItem(text = { Text(if (orientationLocked) "Unlock orientation" else "Lock orientation") }, onClick = onOrientation)
     DropdownMenuItem(text = { Text("Sleep timer: ${model.sleepLabel}") }, onClick = { dialog = "sleep" })
     DropdownMenuItem(text = { Text(if (model.backgroundEnabled) "Stop background/audio-only play" else "Background/audio-only play") }, onClick = {
         if (model.backgroundEnabled) model.setBackground(false)
@@ -29,6 +40,8 @@ fun PlayerExtraMenu(model: PlayerViewModel) {
     DropdownMenuItem(text = { Text("Set B${model.bMs?.let { " (${formatDuration(it)})" }.orEmpty()}") }, onClick = { if (!model.setB()) message = "Set A first, then set B at least half a second later." })
     DropdownMenuItem(text = { Text("Clear A–B repeat") }, onClick = { model.clearRepeat() })
     DropdownMenuItem(text = { Text("Subtitle appearance") }, onClick = { dialog = "style" })
+    }
+    }
     if (dialog == "sleep") AlertDialog(onDismissRequest = { dialog = null }, title = { Text("Sleep timer") }, text = {
         Column { listOf(0, 15, 30, 45, 60, -1).forEach { minutes ->
             TextButton(onClick = { model.setSleep(minutes); dialog = null }) { Text(when { minutes < 0 -> "End of video"; minutes == 0 -> "Off"; else -> "$minutes minutes" }) }

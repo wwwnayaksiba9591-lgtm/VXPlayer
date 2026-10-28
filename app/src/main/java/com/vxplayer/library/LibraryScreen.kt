@@ -18,9 +18,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import com.vxplayer.ui.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -90,18 +98,20 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
         { it.videos.sumOf { video -> video.sizeBytes } }, { it.videos.sumOf { video -> video.durationMs } })
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (selectedFolder != null) TextButton(onClick = { selectedFolder = null; tab = 0 }) { Text(stringResource(R.string.back_to_library)) }
-                Text(folder?.name ?: "VXPlayer", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                TextButton(onClick = { search = !search; if (!search) query = "" }) { Text("Search") }
+            TopAppBar(windowInsets = WindowInsets(0, 0, 0, 0), title = {
+                Text(folder?.name ?: "VXPlayer", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }, navigationIcon = {
+                if (selectedFolder != null) VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back to folders", { selectedFolder = null; tab = 0 })
+            }, actions = {
+                VXIconButton(Icons.Default.Search, "Search library", { search = !search; if (!search) query = "" })
                 Box {
-                    TextButton(onClick = { appMenu = true }) { Text("⋮") }
+                    VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
                         DropdownMenuItem(text = { Text("Settings") }, onClick = { appMenu = false; onSettings() })
                         DropdownMenuItem(text = { Text("Rescan library") }, onClick = { appMenu = false; model.refresh(access()) })
                     }
                 }
-            }
+            })
             if (search) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Box {
@@ -118,7 +128,20 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                     Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
                 }
             }
-            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { model.refresh(access()) }, modifier = Modifier.weight(1f)) {
+            if (selectedFolder == null && state.recentlyPlayed.isNotEmpty() && query.isBlank()) {
+                val last = requireNotNull(resumeCandidate(state.recentlyPlayed) { it.positionMs })
+                VXCard(onClick = { onVideoClick(last, last.folderKey) }, modifier = Modifier.padding(horizontal = VXSpace.large, vertical = VXSpace.small).fillMaxWidth()) {
+                    Row(Modifier.padding(VXSpace.medium), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(VXSpace.medium)) {
+                        Icon(Icons.Default.PlayCircleFilled, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Resume last video", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            Text(last.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+            Crossfade(targetState = tab, animationSpec = tween(160), label = "library tabs", modifier = Modifier.weight(1f)) { displayedTab ->
+            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { model.refresh(access()) }, modifier = Modifier.fillMaxSize()) {
             when {
                 !allowed -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
                     FolderIcon()
@@ -133,11 +156,11 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                     if (Build.VERSION.SDK_INT >= 34 && context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
                         TextButton(onClick = { picker.launch(permissions()) }) { Text(stringResource(R.string.manage_access)) }
                     }
-                    if (selectedFolder == null && tab == 0) {
+                    if (selectedFolder == null && displayedTab == 0) {
                         LazyColumn(state = folderScroll, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (folders.isEmpty()) item { LibraryMessage("No folders found", "Add a video to your device or change the search.") }
+                            if (folders.isEmpty()) item { LibraryMessage("No folders found", "Add a video to your device or change the search.", { query = ""; model.refresh(access()) }) }
                             items(folders, key = { it.key }) { group ->
-                                Card(onClick = { selectedFolder = group.key }, modifier = Modifier.fillMaxWidth()) {
+                                VXCard(onClick = { selectedFolder = group.key }, modifier = Modifier.fillMaxWidth()) {
                                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         FolderIcon()
                                         Column(Modifier.weight(1f)) {
@@ -149,13 +172,13 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                             }
                         }
                     } else {
-                        val baseVideos = if (selectedFolder != null) folder?.videos.orEmpty() else if (tab == 2) state.recentlyPlayed else state.folders.flatMap { it.videos }
+                        val baseVideos = if (selectedFolder != null) folder?.videos.orEmpty() else if (displayedTab == 2) state.recentlyPlayed else state.folders.flatMap { it.videos }
                         val filtered = baseVideos.filter { video -> video.title.contains(query, true) || state.folders.any { it.key == video.folderKey && it.name.contains(query, true) } }
-                        val videos = if (tab == 2 && selectedFolder == null) filtered else orderLibrary(filtered, sort, descending, { it.title }, { it.dateAdded }, { it.sizeBytes }, { it.durationMs })
-                        if (videos.isEmpty()) LibraryMessage("No videos here yet", "Try another folder, allow more videos, or change the search.")
-                        else if (grid) LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val videos = if (displayedTab == 2 && selectedFolder == null) filtered else orderLibrary(filtered, sort, descending, { it.title }, { it.dateAdded }, { it.sizeBytes }, { it.durationMs })
+                        if (videos.isEmpty()) LibraryMessage("No videos here yet", "Try another folder, allow more videos, or change the search.", { query = ""; model.refresh(access()) })
+                        else if (grid) LazyVerticalGrid(columns = GridCells.Adaptive(180.dp), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             gridItems(videos, key = { it.uri.toString() }) { video ->
-                                Card(onClick = { onVideoClick(video, video.folderKey) }) {
+                                VXCard(onClick = { onVideoClick(video, video.folderKey) }) {
                                     VideoThumbnail(video, Modifier.fillMaxWidth())
                                     Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
@@ -168,7 +191,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                                 }
                             }
                         } else
-                        LazyColumn(state = if (selectedFolder != null) detailScroll else if (tab == 2) recentScroll else videosScroll,
+                        LazyColumn(state = if (selectedFolder != null) detailScroll else if (displayedTab == 2) recentScroll else videosScroll,
                             contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (videos.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
                             items(videos, key = { it.uri.toString() }) { video -> VideoRow(video, onClick = { onVideoClick(video, video.folderKey) }) {
@@ -184,26 +207,21 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
 
 }
 
+}
+
 @Composable
 private fun LibraryMessage(title: String, detail: String, retry: (() -> Unit)? = null) {
     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         FolderIcon()
         Text(title, style = MaterialTheme.typography.titleLarge)
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         if (retry != null) OutlinedButton(onClick = retry) { Text("Refresh") }
     }
 }
 
 @Composable
 private fun FolderIcon() {
-    val color = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.size(44.dp, 36.dp)) {
-        drawPath(Path().apply {
-            moveTo(0f, size.height * .1f); lineTo(size.width * .4f, size.height * .1f)
-            lineTo(size.width * .5f, size.height * .3f); lineTo(size.width, size.height * .3f)
-            lineTo(size.width, size.height); lineTo(0f, size.height); close()
-        }, color)
-    }
+    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
 }
 
 private val thumbnails = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
@@ -227,11 +245,12 @@ fun VideoThumbnail(video: Video, modifier: Modifier = Modifier) {
             catch (_: Exception) { null }
         }
     }
-    Column(modifier) {
+    Column(modifier.clip(VXShapes.small)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1.6f).background(MaterialTheme.colorScheme.surfaceVariant)) {
+            Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Center))
             bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             Text(formatDuration(video.durationMs), color = Color.White, style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.BottomEnd).background(Color.Black.copy(alpha = .75f)).padding(3.dp))
+                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
         }
         if (video.positionMs > 0L && video.durationMs > 0L) LinearProgressIndicator(
             progress = { (video.positionMs.toFloat() / video.durationMs).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(2.dp))
@@ -241,14 +260,16 @@ fun VideoThumbnail(video: Video, modifier: Modifier = Modifier) {
 @Composable
 fun VideoRow(video: Video, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
     val context = LocalContext.current
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        VideoThumbnail(video, Modifier.width(112.dp))
+    VXCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        VideoThumbnail(video, Modifier.width(128.dp))
         Column(Modifier.weight(1f)) {
             Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
             Text("${Formatter.formatShortFileSize(context, video.sizeBytes)} · ${video.width} × ${video.height}", style = MaterialTheme.typography.bodySmall)
             if (video.watched) Text(stringResource(R.string.watched), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         trailing()
+    }
     }
 }
 

@@ -13,6 +13,9 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import com.vxplayer.ui.VXIconButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
@@ -71,7 +74,7 @@ fun VideoActions(video: Video, onPlay: () -> Unit, onChanged: () -> Unit) {
         }
     }
     Column {
-        TextButton(onClick = { expanded = true }) { Text("⋮") }
+        VXIconButton(Icons.Default.MoreVert, "Video actions", { expanded = true })
         DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
             listOf("Play", "Info", "Share", "Rename", "Delete").forEach { action ->
                 DropdownMenuItem(text = { Text(action) }, onClick = {
@@ -106,4 +109,3 @@ fun VideoActions(video: Video, onPlay: () -> Unit, onChanged: () -> Unit) {
     }
     error?.let { message -> AlertDialog(onDismissRequest = { error = null }, text = { Text(message) }, confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } }) }
 }
-

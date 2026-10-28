@@ -25,6 +25,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.animation.core.animateFloatAsState
+import com.vxplayer.ui.VXIconButton
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,12 +51,17 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 // Keep menu/picker composition alive while hiding its placement and touch targets.
-private fun Modifier.overlayVisible(visible: Boolean) = layout { measurable, constraints ->
-    val placeable = measurable.measure(constraints)
-    layout(placeable.width, placeable.height) { if (visible) placeable.place(0, 0) }
+@Composable
+private fun Modifier.overlayVisible(visible: Boolean, immediate: Boolean = false): Modifier {
+    val opacity by animateFloatAsState(if (visible) 1f else 0f, tween(180), label = "player controls")
+    return graphicsLayer { alpha = opacity }.layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) { if (visible || (!immediate && opacity > 0f)) placeable.place(0, 0) }
+    }
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "", model: PlayerViewModel = viewModel()) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -66,6 +78,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     var unlockVisible by remember { mutableStateOf(false) }
     var interaction by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
+    var speedSheet by remember { mutableStateOf(false) }
     var aspect by rememberSaveable { mutableIntStateOf(defaults.aspect) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var brightness by rememberSaveable { mutableFloatStateOf(-1f) }
@@ -95,8 +108,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             delay(250)
         }
     }
-    LaunchedEffect(controls, interaction, model.isPlaying, menu, model.choosingSubtitle, swiping, slider) {
-        if (controls && model.isPlaying && !menu && !model.choosingSubtitle && !swiping && slider == null) { delay(3000); controls = false }
+    LaunchedEffect(controls, interaction, model.isPlaying, menu, speedSheet, model.choosingSubtitle, swiping, slider) {
+        if (controls && model.isPlaying && !menu && !speedSheet && !model.choosingSubtitle && !swiping && slider == null) { delay(3000); controls = false }
     }
     LaunchedEffect(indicatorTick, swiping, heldSpeed) { if (!swiping && heldSpeed == null) { delay(1000); indicator = null } }
     LaunchedEffect(pulseTick) {
@@ -159,6 +172,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     }
     LaunchedEffect(window, brightness) { if (window != null && brightness >= 0) window.attributes = window.attributes.apply { screenBrightness = brightness } }
     val visible = controls && !locked && !inPip
+    CompositionLocalProvider(LocalContentColor provides Color.White) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx -> GesturePlayerView(ctx).apply {
             useController = false
@@ -219,41 +233,61 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         }, onRelease = { it.player = null; it.keepScreenOn = false })
         if (!inPip && pulseZone != 0) Box(Modifier.align(if (pulseZone < 0) Alignment.CenterStart else Alignment.CenterEnd)
             .padding(24.dp).size((72 + 48 * pulse.value).dp).background(Color.White.copy(alpha = .22f * (1f - pulse.value)), CircleShape))
-        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().overlayVisible(visible).background(Color.Black.copy(alpha = .65f)).safeDrawingPadding()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("Back", color = Color.White) }
-                Text(model.activeTitle.ifBlank { title }, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().overlayVisible(visible, locked || inPip)
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .88f), Color.Black.copy(alpha = .3f), Color.Transparent))).safeDrawingPadding()) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
+                Text(model.activeTitle.ifBlank { title }, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                 TrackMenu(model)
-                if (Build.VERSION.SDK_INT >= 26) TextButton(onClick = { host?.enterPlayerPip(true) }, enabled = !model.backgroundEnabled) { Text("PiP", color = Color.White) }
-                Box {
-                    TextButton(onClick = { menu = true; touch() }) { Text("⋮", color = Color.White) }
-                    DropdownMenu(menu, onDismissRequest = { menu = false; touch() }) {
-                        PlayerViewModel.SPEEDS.forEach { rate -> DropdownMenuItem(text = { Text("${rate}x${if (rate == model.speed) " ✓" else ""}") }, onClick = { model.changeSpeed(rate); menu = false; touch() }) }
-                        Row { OrientationControls(orientation) }
-                        PlayerExtraMenu(model)
-                    }
-                }
+                if (Build.VERSION.SDK_INT >= 26) VXIconButton(Icons.Default.PictureInPictureAlt, "Picture in picture", { host?.enterPlayerPip(true) }, enabled = !model.backgroundEnabled && model.player != null)
+                VXIconButton(Icons.Default.MoreVert, "Playback options", { menu = true; touch() })
             }
         }
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().overlayVisible(visible).background(Color.Black.copy(alpha = .65f)).safeDrawingPadding().padding(horizontal = 12.dp)) {
+        PlayerExtraMenu(model, show = menu && !inPip, onDismiss = { menu = false; touch() },
+            onSpeed = { menu = false; speedSheet = true; touch() }, orientationLocked = orientation.locked,
+            onOrientation = {
+                orientation.locked = !orientation.locked
+                orientation.requested = if (!orientation.locked) ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    else if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                touch()
+            })
+        if (speedSheet && !inPip) SpeedSheet(model) { speedSheet = false; touch() }
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().overlayVisible(visible, locked || inPip)
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .55f), Color.Black.copy(alpha = .9f))))
+            .safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(formatDuration(slider?.toLong() ?: position), color = Color.White)
+                Text(formatDuration(slider?.toLong() ?: position), color = Color.White, style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), maxLines = 1)
+                val sliderColors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = .3f))
                 Slider(value = slider ?: position.toFloat().coerceAtMost(duration.toFloat()), onValueChange = { slider = it; touch() },
                     onValueChangeFinished = { slider?.let { model.seekTo(it.toLong()) }; slider = null; touch() },
-                    valueRange = 0f..duration.coerceAtLeast(1L).toFloat(), enabled = duration > 0, modifier = Modifier.weight(1f))
-                TextButton(onClick = { remaining = !remaining; touch() }) { Text(if (remaining) "−${formatDuration(duration - position)}" else formatDuration(duration), color = Color.White) }
+                    valueRange = 0f..duration.coerceAtLeast(1L).toFloat(), enabled = duration > 0, colors = sliderColors, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    thumb = { Box(Modifier.size(12.dp, 24.dp).background(Color.White, RoundedCornerShape(6.dp))) },
+                    track = { state -> SliderDefaults.Track(sliderState = state, colors = sliderColors, modifier = Modifier.height(8.dp)) })
+                TextButton(onClick = { remaining = !remaining; touch() }) {
+                    Text(if (remaining) "−${formatDuration(duration - position)}" else formatDuration(duration), color = Color.White,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), maxLines = 1)
+                }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-                TextButton(onClick = { locked = true; controls = false; unlockVisible = true; touch() }) { Text("Lock", color = Color.White) }
-                TextButton(onClick = { model.moveInPlaylist(-1); touch() }, enabled = adjacentVideo(model.playlist, model.activeUri, -1) != null) { Text("Previous") }
-                FilledTonalButton(onClick = { model.player?.let { if (it.isPlaying) it.pause() else it.play() }; touch() }, modifier = Modifier.height(56.dp)) { Text(if (model.isPlaying) "Ⅱ" else "▶") }
-                TextButton(onClick = { model.moveInPlaylist(1); touch() }, enabled = adjacentVideo(model.playlist, model.activeUri, 1) != null) { Text("Next") }
-                TextButton(onClick = { aspect = (aspect + 1) % 4; zoom = 1f; feedback(listOf("Fit", "Fill", "Zoom", "100%")[aspect]); touch() }) { Text(listOf("Fit", "Fill", "Zoom", "100%")[aspect], color = Color.White) }
-                TextButton(onClick = { orientation.locked = true; orientation.requested = if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; touch() }) { Text("Rotate", color = Color.White) }
+                VXIconButton(Icons.Default.Lock, "Lock controls", { locked = true; controls = false; unlockVisible = true; touch() })
+                VXIconButton(Icons.Default.SkipPrevious, "Previous video", { model.moveInPlaylist(-1); touch() }, enabled = model.player != null && adjacentVideo(model.playlist, model.activeUri, -1) != null)
+                FilledIconButton(onClick = { model.player?.let { if (it.isPlaying) it.pause() else it.play() }; touch() },
+                    modifier = Modifier.size(64.dp), shape = RoundedCornerShape(24.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = .18f), contentColor = Color.White)) {
+                    Icon(if (model.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, if (model.isPlaying) "Pause" else "Play", modifier = Modifier.size(36.dp))
+                }
+                VXIconButton(Icons.Default.SkipNext, "Next video", { model.moveInPlaylist(1); touch() }, enabled = model.player != null && adjacentVideo(model.playlist, model.activeUri, 1) != null)
+                VXIconButton(Icons.Default.AspectRatio, "Aspect ratio: ${listOf("Fit", "Fill", "Zoom", "100%")[aspect]}", {
+                    aspect = (aspect + 1) % 4; zoom = 1f; feedback(listOf("Fit", "Fill", "Zoom", "100%")[aspect]); touch()
+                })
+                VXIconButton(Icons.Default.ScreenRotation, "Rotate video", {
+                    orientation.locked = true; orientation.requested = if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; touch()
+                })
             }
         }
         if (locked && unlockVisible && !inPip) TextButton(onClick = { locked = false; controls = true; unlockVisible = false; touch() }, modifier = Modifier.align(Alignment.CenterEnd).safeDrawingPadding().background(Color.Black.copy(alpha = .8f))) { Text("Unlock", color = Color.White) }
         if (!inPip) indicator?.let { Text(it, color = Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(12.dp)).padding(16.dp)) }
         if (model.failed) Text("Could not play this video", color = Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black).padding(24.dp))
+    }
     }
 }

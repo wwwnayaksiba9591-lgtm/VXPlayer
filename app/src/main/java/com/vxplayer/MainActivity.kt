@@ -45,6 +45,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.navigation.navArgument
 import com.vxplayer.library.LibraryScreen
 import com.vxplayer.library.Video
@@ -102,7 +105,8 @@ class MainActivity : ComponentActivity() {
             val navigation = rememberNavController()
             val destination by navigation.currentBackStackEntryAsState()
             VXTheme(settings, playerMode = destination?.destination?.route?.startsWith("player") == true) {
-                NavHost(navigation, startDestination = "library") {
+                NavHost(navigation, startDestination = "library", enterTransition = { fadeIn(tween(180)) },
+                    exitTransition = { fadeOut(tween(140)) }, popEnterTransition = { fadeIn(tween(180)) }, popExitTransition = { fadeOut(tween(140)) }) {
                     composable("library") {
                         LibraryScreen(onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->
                             navigation.navigate("player?uri=${Uri.encode(video.uri.toString())}&title=${Uri.encode(video.title)}&folder=${Uri.encode(folder)}") {
