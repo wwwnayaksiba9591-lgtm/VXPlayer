@@ -51,6 +51,33 @@ class PlaybackPositionStoreTest {
         } finally { scope.cancel() }
     }
 
+    @Test fun importIsSerializedAndMergesWithoutRemovingOtherVideos() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val store = PlaybackPositionStore(MemoryDao(), scope)
+            store.save("content://v/1", 100L); store.save("content://v/2", 200L)
+            withTimeout(5000) {
+                store.importPositions(listOf(PlaybackPosition("content://v/1", 900L), PlaybackPosition("content://v/3", 300L)))
+                assertEquals(mapOf("content://v/1" to 900L, "content://v/2" to 200L, "content://v/3" to 300L), store.snapshot().positions)
+                store.clearHistory()
+                assertEquals(emptyMap<String, Long>(), store.snapshot().positions)
+            }
+        } finally { scope.cancel() }
+    }
+
+    @Test fun importFailureIsReportedAndDoesNotStopPersistenceQueue() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val store = PlaybackPositionStore(MemoryDao(), scope, importData = { error("Storage failure") })
+            withTimeout(5000) {
+                org.junit.Assert.assertTrue(runCatching { store.importPositions(listOf(PlaybackPosition("content://v/1", 900L))) }.isFailure)
+                store.save("content://v/2", 200L)
+                assertEquals(200L, store.load("content://v/2"))
+                assertNull(store.load("content://v/1"))
+            }
+        } finally { scope.cancel() }
+    }
+
     @Test fun completionClearRunsAfterAnInFlightCheckpoint() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {

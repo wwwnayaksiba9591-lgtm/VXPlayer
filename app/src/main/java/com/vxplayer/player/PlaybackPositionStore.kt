@@ -46,7 +46,7 @@ abstract class PlaybackDatabase : RoomDatabase() {
 }
 
 /** Application-owned work survives a player ViewModel being cleared on Back. */
-class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope: CoroutineScope, history: RecentlyPlayedDao? = null, watched: WatchedVideoDao? = null, choices: TrackPreferenceDao? = null, clearData: (suspend () -> Unit)? = null) {
+class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope: CoroutineScope, history: RecentlyPlayedDao? = null, watched: WatchedVideoDao? = null, choices: TrackPreferenceDao? = null, clearData: (suspend () -> Unit)? = null, importData: (suspend (List<PlaybackPosition>) -> Unit)? = null) {
     private sealed interface Command {
         data class Read(val uri: String, val result: CompletableDeferred<Long?>) : Command
         data class Write(val uri: String, val positionMs: Long) : Command
@@ -57,6 +57,7 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
         data class ReadChoice(val uri: String, val result: CompletableDeferred<TrackPreference?>) : Command
         data class WriteChoice(val choice: TrackPreference) : Command
         data class Clear(val result: CompletableDeferred<Unit>) : Command
+        data class Import(val positions: List<PlaybackPosition>, val result: CompletableDeferred<Unit>) : Command
     }
     private val commands = Channel<Command>(Channel.UNLIMITED)
 
@@ -67,6 +68,11 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                 try {
                     when (command) {
                         is Command.Read -> command.result.complete(dao.load(command.uri))
+                        is Command.Import -> {
+                            if (importData != null) importData(command.positions)
+                            else command.positions.forEach { dao.save(it) }
+                            command.result.complete(Unit)
+                        }
                         is Command.Clear -> {
                             if (clearData != null) clearData() else { dao.clearAll(); history?.clear(); watched?.clear() }
                             command.result.complete(Unit)
@@ -85,6 +91,7 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                 } catch (error: Exception) {
                     when (command) {
                         is Command.Read -> command.result.completeExceptionally(error)
+                        is Command.Import -> command.result.completeExceptionally(error)
                         is Command.Clear -> command.result.completeExceptionally(error)
                         is Command.ReadChoice -> command.result.completeExceptionally(error)
                         is Command.Recent -> command.result.completeExceptionally(error)
@@ -111,6 +118,11 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
     }
 
     fun finished(uri: String) { commands.trySend(Command.Finished(uri)).getOrThrow() }
+    suspend fun importPositions(positions: List<PlaybackPosition>) {
+        require(positions.size <= 10_000 && positions.all { it.uri.isNotBlank() && it.positionMs > 0L })
+        val result = CompletableDeferred<Unit>()
+        commands.send(Command.Import(positions.toList(), result)); result.await()
+    }
     suspend fun clearHistory() {
         val result = CompletableDeferred<Unit>()
         commands.send(Command.Clear(result)); result.await()
@@ -142,7 +154,8 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                 val database = Room.databaseBuilder(context.applicationContext, PlaybackDatabase::class.java, "playback.db")
                     .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3, PLAYBACK_MIGRATION_3_4).build()
                 PlaybackPositionStore(database.positions(), CoroutineScope(SupervisorJob() + Dispatchers.IO), database.recentlyPlayed(), database.watched(), database.trackPreferences(),
-                    clearData = { database.withTransaction { database.positions().clearAll(); database.recentlyPlayed().clear(); database.watched().clear() } })
+                    clearData = { database.withTransaction { database.positions().clearAll(); database.recentlyPlayed().clear(); database.watched().clear() } },
+                    importData = { positions -> database.withTransaction { positions.forEach { database.positions().save(it) } } })
             }.also { instance = it }
         }
     }

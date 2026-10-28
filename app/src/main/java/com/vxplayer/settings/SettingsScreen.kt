@@ -57,6 +57,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Switch(settings.rememberBoost, onCheckedChange = { checked -> store.update { it.copy(rememberBoost = checked) } })
             }
             HorizontalDivider()
+            BackupControls()
+            HorizontalDivider()
             OutlinedButton(onClick = { confirm = true }) { Text("Clear history and resume positions") }
             Text("Track preferences and playback defaults are kept.", style = MaterialTheme.typography.bodySmall)
             result?.let { Text(it, color = MaterialTheme.colorScheme.primary) }

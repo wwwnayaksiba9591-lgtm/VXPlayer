@@ -45,6 +45,7 @@ dependencies {
     implementation(libs.media3.effect)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.gson)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
 }
