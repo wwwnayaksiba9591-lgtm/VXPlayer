@@ -23,6 +23,8 @@ data class PlaybackPosition(@PrimaryKey val uri: String, val positionMs: Long)
 
 @Dao
 interface PlaybackPositionDao {
+    @Query("SELECT * FROM playback_positions")
+    suspend fun all(): List<PlaybackPosition>
     @Query("SELECT positionMs FROM playback_positions WHERE uri = :uri")
     suspend fun load(uri: String): Long?
 
@@ -33,19 +35,22 @@ interface PlaybackPositionDao {
     suspend fun clear(uri: String)
 }
 
-@Database(entities = [PlaybackPosition::class, RecentlyPlayed::class], version = 2, exportSchema = false)
+@Database(entities = [PlaybackPosition::class, RecentlyPlayed::class, WatchedVideo::class], version = 3, exportSchema = false)
 abstract class PlaybackDatabase : RoomDatabase() {
     abstract fun positions(): PlaybackPositionDao
     abstract fun recentlyPlayed(): RecentlyPlayedDao
+    abstract fun watched(): WatchedVideoDao
 }
 
 /** Application-owned work survives a player ViewModel being cleared on Back. */
-class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope: CoroutineScope, history: RecentlyPlayedDao? = null) {
+class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope: CoroutineScope, history: RecentlyPlayedDao? = null, watched: WatchedVideoDao? = null) {
     private sealed interface Command {
         data class Read(val uri: String, val result: CompletableDeferred<Long?>) : Command
         data class Write(val uri: String, val positionMs: Long) : Command
         data class Record(val video: RecentlyPlayed) : Command
         data class Recent(val result: CompletableDeferred<List<RecentlyPlayed>>) : Command
+        data class Finished(val uri: String) : Command
+        data class Snapshot(val result: CompletableDeferred<PlaybackSnapshot>) : Command
     }
     private val commands = Channel<Command>(Channel.UNLIMITED)
 
@@ -58,6 +63,8 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                         is Command.Read -> command.result.complete(dao.load(command.uri))
                         is Command.Record -> history?.record(command.video)
                         is Command.Recent -> command.result.complete(history?.recent().orEmpty())
+                        is Command.Finished -> watched?.save(WatchedVideo(command.uri))
+                        is Command.Snapshot -> command.result.complete(PlaybackSnapshot(dao.all().associate { it.uri to it.positionMs }, watched?.all().orEmpty().map { it.uri }.toSet()))
                         is Command.Write -> if (command.positionMs <= 0L) dao.clear(command.uri)
                             else dao.save(PlaybackPosition(command.uri, command.positionMs))
                     }
@@ -67,6 +74,7 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                     when (command) {
                         is Command.Read -> command.result.completeExceptionally(error)
                         is Command.Recent -> command.result.completeExceptionally(error)
+                        is Command.Snapshot -> command.result.completeExceptionally(error)
                         else -> Log.e("PlaybackPositionStore", "Could not save playback data", error)
                     }
                 }
@@ -88,6 +96,14 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
         commands.trySend(Command.Record(RecentlyPlayed(uri, title, System.currentTimeMillis()))).getOrThrow()
     }
 
+    fun finished(uri: String) { commands.trySend(Command.Finished(uri)).getOrThrow() }
+
+    suspend fun snapshot(): PlaybackSnapshot {
+        val result = CompletableDeferred<PlaybackSnapshot>()
+        commands.send(Command.Snapshot(result))
+        return result.await()
+    }
+
     suspend fun recent(): List<RecentlyPlayed> {
         val result = CompletableDeferred<List<RecentlyPlayed>>()
         commands.send(Command.Recent(result))
@@ -100,8 +116,8 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
         fun get(context: Context): PlaybackPositionStore = instance ?: synchronized(this) {
             instance ?: run {
                 val database = Room.databaseBuilder(context.applicationContext, PlaybackDatabase::class.java, "playback.db")
-                    .addMigrations(PLAYBACK_MIGRATION_1_2).build()
-                PlaybackPositionStore(database.positions(), CoroutineScope(SupervisorJob() + Dispatchers.IO), database.recentlyPlayed())
+                    .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3).build()
+                PlaybackPositionStore(database.positions(), CoroutineScope(SupervisorJob() + Dispatchers.IO), database.recentlyPlayed(), database.watched())
             }.also { instance = it }
         }
     }

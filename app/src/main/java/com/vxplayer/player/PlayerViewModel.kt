@@ -216,6 +216,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             savedState["position"] = position
             savedState["playWhenReady"] = it.playWhenReady && it.playbackState != Player.STATE_ENDED
             currentUri?.let { uri -> positions.save(uri, position) }
+            if (it.playbackState == Player.STATE_ENDED) currentUri?.let { uri -> positions.finished(uri) }
         }
     }
 

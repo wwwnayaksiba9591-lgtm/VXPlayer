@@ -16,6 +16,7 @@ class PlaybackPositionStoreTest {
         val values = mutableMapOf<String, Long>()
         var saveGate: CompletableDeferred<Unit>? = null
         override suspend fun load(uri: String) = values[uri]
+        override suspend fun all() = values.map { PlaybackPosition(it.key, it.value) }
         override suspend fun save(position: PlaybackPosition) {
             saveGate?.await()
             values[position.uri] = position.positionMs
