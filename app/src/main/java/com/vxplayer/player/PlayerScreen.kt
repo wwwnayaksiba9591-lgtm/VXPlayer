@@ -33,6 +33,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.*
 import androidx.lifecycle.*
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vxplayer.settings.AppSettings
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -55,6 +57,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     val host = activity as? MainActivity
     val inPip = host?.pipMode == true
     val context = LocalContext.current
+    val defaults by AppSettings.get(context).state.collectAsStateWithLifecycle()
     val window = activity?.window
     val orientation = rememberOrientationController()
     val audio = remember(context) { context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -63,7 +66,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     var unlockVisible by remember { mutableStateOf(false) }
     var interaction by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
-    var aspect by rememberSaveable { mutableIntStateOf(0) }
+    var aspect by rememberSaveable { mutableIntStateOf(defaults.aspect) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var brightness by rememberSaveable { mutableFloatStateOf(-1f) }
     var indicator by remember { mutableStateOf<String?>(null) }
@@ -100,10 +103,16 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     }
     LaunchedEffect(unlockVisible, interaction) { if (unlockVisible) { delay(3000); unlockVisible = false } }
     LaunchedEffect(model.activeUri) { zoom = 1f; controls = true; touch() }
-    LaunchedEffect(model.videoSize, orientation.locked, inPip) {
+    LaunchedEffect(model.videoSize, orientation.locked, inPip, defaults.orientation) {
         val size = model.videoSize
-        if (!orientation.locked && !inPip && size.width > 0 && size.height > 0)
-            orientation.requested = if (size.width * size.pixelWidthHeightRatio >= size.height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        if (!orientation.locked && !inPip) orientation.requested = when (defaults.orientation) {
+            "System" -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            "Portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            "Landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else -> if (size.width > 0 && size.height > 0) {
+                if (size.width * size.pixelWidthHeightRatio >= size.height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            } else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
     DisposableEffect(host, model) {
         host?.canEnterPip = { model.player?.let { it.playWhenReady && it.playbackState != androidx.media3.common.Player.STATE_ENDED } == true && !model.failed && !model.choosingSubtitle && !model.backgroundEnabled }

@@ -49,6 +49,9 @@ import com.vxplayer.library.LibraryScreen
 import com.vxplayer.library.Video
 import com.vxplayer.library.VideoLibraryViewModel
 import com.vxplayer.player.PlayerScreen
+import com.vxplayer.settings.AppSettings
+import com.vxplayer.settings.SettingsScreen
+import com.vxplayer.settings.VXTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -94,16 +97,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
+            val settings by AppSettings.get(applicationContext).state.collectAsStateWithLifecycle()
+            VXTheme(settings) {
                 val navigation = rememberNavController()
                 NavHost(navigation, startDestination = "library") {
                     composable("library") {
-                        LibraryScreen(onVideoClick = { video, folder ->
+                        LibraryScreen(onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->
                             navigation.navigate("player?uri=${Uri.encode(video.uri.toString())}&title=${Uri.encode(video.title)}&folder=${Uri.encode(folder)}") {
                                 launchSingleTop = true
                             }
                         })
                     }
+                    composable("settings") { SettingsScreen(onBack = { navigation.popBackStack() }) }
                     composable(
                         "player?uri={uri}&title={title}&folder={folder}",
                         arguments = listOf(

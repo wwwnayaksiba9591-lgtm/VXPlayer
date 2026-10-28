@@ -10,6 +10,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ data class PlaybackPosition(@PrimaryKey val uri: String, val positionMs: Long)
 
 @Dao
 interface PlaybackPositionDao {
+    @Query("DELETE FROM playback_positions") suspend fun clearAll()
     @Query("SELECT * FROM playback_positions")
     suspend fun all(): List<PlaybackPosition>
     @Query("SELECT positionMs FROM playback_positions WHERE uri = :uri")
@@ -44,7 +46,7 @@ abstract class PlaybackDatabase : RoomDatabase() {
 }
 
 /** Application-owned work survives a player ViewModel being cleared on Back. */
-class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope: CoroutineScope, history: RecentlyPlayedDao? = null, watched: WatchedVideoDao? = null, choices: TrackPreferenceDao? = null) {
+class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope: CoroutineScope, history: RecentlyPlayedDao? = null, watched: WatchedVideoDao? = null, choices: TrackPreferenceDao? = null, clearData: (suspend () -> Unit)? = null) {
     private sealed interface Command {
         data class Read(val uri: String, val result: CompletableDeferred<Long?>) : Command
         data class Write(val uri: String, val positionMs: Long) : Command
@@ -54,6 +56,7 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
         data class Snapshot(val result: CompletableDeferred<PlaybackSnapshot>) : Command
         data class ReadChoice(val uri: String, val result: CompletableDeferred<TrackPreference?>) : Command
         data class WriteChoice(val choice: TrackPreference) : Command
+        data class Clear(val result: CompletableDeferred<Unit>) : Command
     }
     private val commands = Channel<Command>(Channel.UNLIMITED)
 
@@ -64,6 +67,10 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                 try {
                     when (command) {
                         is Command.Read -> command.result.complete(dao.load(command.uri))
+                        is Command.Clear -> {
+                            if (clearData != null) clearData() else { dao.clearAll(); history?.clear(); watched?.clear() }
+                            command.result.complete(Unit)
+                        }
                         is Command.ReadChoice -> command.result.complete(choices?.load(command.uri))
                         is Command.WriteChoice -> choices?.save(command.choice)
                         is Command.Record -> history?.record(command.video)
@@ -78,6 +85,7 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
                 } catch (error: Exception) {
                     when (command) {
                         is Command.Read -> command.result.completeExceptionally(error)
+                        is Command.Clear -> command.result.completeExceptionally(error)
                         is Command.ReadChoice -> command.result.completeExceptionally(error)
                         is Command.Recent -> command.result.completeExceptionally(error)
                         is Command.Snapshot -> command.result.completeExceptionally(error)
@@ -103,6 +111,10 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
     }
 
     fun finished(uri: String) { commands.trySend(Command.Finished(uri)).getOrThrow() }
+    suspend fun clearHistory() {
+        val result = CompletableDeferred<Unit>()
+        commands.send(Command.Clear(result)); result.await()
+    }
     fun saveChoice(choice: TrackPreference) { commands.trySend(Command.WriteChoice(choice)).getOrThrow() }
     suspend fun loadChoice(uri: String): TrackPreference? {
         val result = CompletableDeferred<TrackPreference?>()
@@ -129,7 +141,8 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
             instance ?: run {
                 val database = Room.databaseBuilder(context.applicationContext, PlaybackDatabase::class.java, "playback.db")
                     .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3, PLAYBACK_MIGRATION_3_4).build()
-                PlaybackPositionStore(database.positions(), CoroutineScope(SupervisorJob() + Dispatchers.IO), database.recentlyPlayed(), database.watched(), database.trackPreferences())
+                PlaybackPositionStore(database.positions(), CoroutineScope(SupervisorJob() + Dispatchers.IO), database.recentlyPlayed(), database.watched(), database.trackPreferences(),
+                    clearData = { database.withTransaction { database.positions().clearAll(); database.recentlyPlayed().clear(); database.watched().clear() } })
             }.also { instance = it }
         }
     }

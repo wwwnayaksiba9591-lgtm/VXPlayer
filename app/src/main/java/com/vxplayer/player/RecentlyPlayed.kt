@@ -14,6 +14,7 @@ data class RecentlyPlayed(@PrimaryKey val uri: String, val title: String, val pl
 
 @Dao
 interface RecentlyPlayedDao {
+    @Query("DELETE FROM recently_played") suspend fun clear()
     @Upsert
     suspend fun upsert(video: RecentlyPlayed)
 

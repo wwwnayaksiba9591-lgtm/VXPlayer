@@ -50,7 +50,7 @@ private fun permissions() = when {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryViewModel = viewModel()) {
+fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit = {}, model: VideoLibraryViewModel = viewModel()) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     fun access() = permissions().any { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
@@ -65,6 +65,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
     var sort by remember { mutableStateOf(runCatching { LibrarySort.valueOf(preferences.getString("sort", "Name")!!) }.getOrDefault(LibrarySort.Name)) }
     var descending by remember { mutableStateOf(preferences.getBoolean("descending", false)) }
     var sortOpen by remember { mutableStateOf(false) }
+    var appMenu by remember { mutableStateOf(false) }
     val folderScroll = rememberLazyListState()
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
@@ -92,8 +93,14 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (selectedFolder != null) TextButton(onClick = { selectedFolder = null; tab = 0 }) { Text(stringResource(R.string.back_to_library)) }
                 Text(folder?.name ?: "VXPlayer", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                TextButton(onClick = { model.refresh(access()) }) { Text(stringResource(R.string.refresh)) }
                 TextButton(onClick = { search = !search; if (!search) query = "" }) { Text("Search") }
+                Box {
+                    TextButton(onClick = { appMenu = true }) { Text("⋮") }
+                    DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
+                        DropdownMenuItem(text = { Text("Settings") }, onClick = { appMenu = false; onSettings() })
+                        DropdownMenuItem(text = { Text("Rescan library") }, onClick = { appMenu = false; model.refresh(access()) })
+                    }
+                }
             }
             if (search) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -107,26 +114,28 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
                 TextButton(onClick = { grid = !grid; preferences.edit().putBoolean("grid", grid).apply() }) { Text(if (grid) "List" else "Grid") }
             }
             if (selectedFolder == null) TabRow(selectedTabIndex = tab) {
-                listOf(R.string.folders_tab, R.string.videos_tab, R.string.recently_played).forEachIndexed { index, label ->
-                    Tab(selected = tab == index, onClick = { tab = index }, text = { Text(stringResource(label)) })
+                listOf("Folders", "Videos", "Recent").forEachIndexed { index, label ->
+                    Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
                 }
             }
             PullToRefreshBox(isRefreshing = state.loading, onRefresh = { model.refresh(access()) }, modifier = Modifier.weight(1f)) {
             when {
-                !allowed -> Column(Modifier.padding(24.dp)) {
+                !allowed -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
+                    FolderIcon()
+                    Text("Your video library", style = MaterialTheme.typography.headlineSmall)
                     Text(stringResource(R.string.permission_explanation))
                     Button(onClick = { picker.launch(permissions()) }) { Text(stringResource(R.string.allow_videos)) }
                     TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }) { Text(stringResource(R.string.settings)) }
                 }
-                state.loading && state.folders.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                state.failed -> Text(stringResource(R.string.scan_failed), Modifier.padding(24.dp))
+                state.loading && state.folders.isEmpty() -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) { CircularProgressIndicator(); Text("Finding videos…") }
+                state.failed -> LibraryMessage("Unable to read the library", "Check video access, then refresh.", { model.refresh(access()) })
                 else -> {
                     if (Build.VERSION.SDK_INT >= 34 && context.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
                         TextButton(onClick = { picker.launch(permissions()) }) { Text(stringResource(R.string.manage_access)) }
                     }
                     if (selectedFolder == null && tab == 0) {
                         LazyColumn(state = folderScroll, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (state.folders.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
+                            if (folders.isEmpty()) item { LibraryMessage("No folders found", "Add a video to your device or change the search.") }
                             items(folders, key = { it.key }) { group ->
                                 Card(onClick = { selectedFolder = group.key }, modifier = Modifier.fillMaxWidth()) {
                                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -143,7 +152,8 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
                         val baseVideos = if (selectedFolder != null) folder?.videos.orEmpty() else if (tab == 2) state.recentlyPlayed else state.folders.flatMap { it.videos }
                         val filtered = baseVideos.filter { video -> video.title.contains(query, true) || state.folders.any { it.key == video.folderKey && it.name.contains(query, true) } }
                         val videos = if (tab == 2 && selectedFolder == null) filtered else orderLibrary(filtered, sort, descending, { it.title }, { it.dateAdded }, { it.sizeBytes }, { it.durationMs })
-                        if (grid) LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (videos.isEmpty()) LibraryMessage("No videos here yet", "Try another folder, allow more videos, or change the search.")
+                        else if (grid) LazyVerticalGrid(columns = GridCells.Adaptive(148.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             gridItems(videos, key = { it.uri.toString() }) { video ->
                                 Card(onClick = { onVideoClick(video, video.folderKey) }) {
                                     VideoThumbnail(video, Modifier.fillMaxWidth())
@@ -151,6 +161,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
                                         Column(Modifier.weight(1f)) {
                                             Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                             Text("${Formatter.formatShortFileSize(context, video.sizeBytes)} · ${video.width} × ${video.height}", style = MaterialTheme.typography.labelSmall)
+                                            if (video.watched) Text("Watched", style = MaterialTheme.typography.labelSmall)
                                         }
                                         VideoActions(video, { onVideoClick(video, video.folderKey) }, { model.refresh(access()) })
                                     }
@@ -171,6 +182,16 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, model: VideoLibraryView
     }
 }
 
+}
+
+@Composable
+private fun LibraryMessage(title: String, detail: String, retry: (() -> Unit)? = null) {
+    Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        FolderIcon()
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (retry != null) OutlinedButton(onClick = retry) { Text("Refresh") }
+    }
 }
 
 @Composable

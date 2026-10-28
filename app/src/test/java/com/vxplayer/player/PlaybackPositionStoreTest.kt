@@ -17,6 +17,7 @@ class PlaybackPositionStoreTest {
         var saveGate: CompletableDeferred<Unit>? = null
         override suspend fun load(uri: String) = values[uri]
         override suspend fun all() = values.map { PlaybackPosition(it.key, it.value) }
+        override suspend fun clearAll() { values.clear() }
         override suspend fun save(position: PlaybackPosition) {
             saveGate?.await()
             values[position.uri] = position.positionMs
@@ -34,6 +35,18 @@ class PlaybackPositionStoreTest {
                 assertEquals(12_000L, store.load("content://videos/1"))
                 assertEquals(45_000L, store.load("content://videos/2"))
                 assertNull(store.load("content://videos/3"))
+            }
+        } finally { scope.cancel() }
+    }
+
+    @Test fun clearHistoryRunsAfterPendingSaves() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val store = PlaybackPositionStore(MemoryDao(), scope)
+            store.save("a", 10000L); store.save("b", 20000L)
+            withTimeout(5000) {
+                store.clearHistory()
+                assertNull(store.load("a")); assertNull(store.load("b"))
             }
         } finally { scope.cancel() }
     }

@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import com.vxplayer.settings.AppSettings
 import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
@@ -78,7 +79,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         private set
     var isPlaying by mutableStateOf(false)
         private set
-    var speed by mutableStateOf(savedState.get<Float>("speed") ?: 1f)
+    var speed by mutableStateOf(savedState.get<Float>("speed") ?: AppSettings.get(application).state.value.speed)
         private set
     private val positions = PlaybackPositionStore.get(application)
     private var starting: Job? = null
@@ -160,7 +161,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                                 if (!foreground) stop()
                                 return
                             }
-                            advance = viewModelScope.launch {
+                            if (AppSettings.get(getApplication()).state.value.autoNext) advance = viewModelScope.launch {
                                 yield()
                                 if (player?.playbackState == Player.STATE_ENDED) moveInPlaylist(1)
                             }
