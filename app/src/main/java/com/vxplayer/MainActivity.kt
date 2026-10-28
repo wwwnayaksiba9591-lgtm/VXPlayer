@@ -44,6 +44,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.vxplayer.library.LibraryScreen
 import com.vxplayer.library.Video
@@ -98,8 +99,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val settings by AppSettings.get(applicationContext).state.collectAsStateWithLifecycle()
-            VXTheme(settings) {
-                val navigation = rememberNavController()
+            val navigation = rememberNavController()
+            val destination by navigation.currentBackStackEntryAsState()
+            VXTheme(settings, playerMode = destination?.destination?.route?.startsWith("player") == true) {
                 NavHost(navigation, startDestination = "library") {
                     composable("library") {
                         LibraryScreen(onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->

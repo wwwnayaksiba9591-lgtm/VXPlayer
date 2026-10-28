@@ -32,7 +32,11 @@ fun SettingsScreen(onBack: () -> Unit) {
             val aspects = listOf("Fit", "Fill", "Zoom", "100%")
             SettingChoice("Default aspect ratio", aspects[settings.aspect], aspects) { label -> store.update { it.copy(aspect = aspects.indexOf(label)) } }
             SettingChoice("Default orientation", settings.orientation, listOf("Auto", "System", "Portrait", "Landscape")) { label -> store.update { it.copy(orientation = label) } }
-            SettingChoice("Theme", settings.theme, listOf("Dark", "System")) { label -> store.update { it.copy(theme = label) } }
+            SettingChoice("Theme", settings.theme, listOf("System", "Light", "Dark")) { label -> store.update { it.copy(theme = label) } }
+            if (android.os.Build.VERSION.SDK_INT >= 31) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Dynamic color (Material You)", modifier = Modifier.weight(1f))
+                Switch(settings.dynamicColor, onCheckedChange = { checked -> store.update { it.copy(dynamicColor = checked) } })
+            }
             HorizontalDivider()
             OutlinedButton(onClick = { confirm = true }) { Text("Clear history and resume positions") }
             Text("Track preferences and playback defaults are kept.", style = MaterialTheme.typography.bodySmall)
