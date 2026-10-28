@@ -106,23 +106,23 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             orientation.requested = if (size.width * size.pixelWidthHeightRatio >= size.height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
     }
     DisposableEffect(host, model) {
-        host?.canEnterPip = { model.player?.let { it.playWhenReady && it.playbackState != androidx.media3.common.Player.STATE_ENDED } == true && !model.failed && !model.choosingSubtitle }
-        host?.releaseHiddenPlayer = { model.stop() }
+        host?.canEnterPip = { model.player?.let { it.playWhenReady && it.playbackState != androidx.media3.common.Player.STATE_ENDED } == true && !model.failed && !model.choosingSubtitle && !model.backgroundEnabled }
+        host?.releaseHiddenPlayer = { model.onHidden() }
         onDispose { host?.canEnterPip = { false }; host?.releaseHiddenPlayer = {}; host?.updatePip() }
     }
-    LaunchedEffect(host, model.isPlaying, model.choosingSubtitle) { host?.updatePip() }
+    LaunchedEffect(host, model.isPlaying, model.choosingSubtitle, model.backgroundEnabled) { host?.updatePip() }
     DisposableEffect(lifecycle, uri) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> model.start(uri, title, folder)
+                Lifecycle.Event.ON_START -> { model.foreground = true; model.start(uri, title, folder) }
                 Lifecycle.Event.ON_PAUSE -> model.savePlaybackState()
-                Lifecycle.Event.ON_STOP -> if (host?.pipMode != true) model.stop()
+                Lifecycle.Event.ON_STOP -> if (host?.pipMode != true) model.onHidden()
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) model.start(uri, title, folder)
-        onDispose { lifecycle.removeObserver(observer); model.stop() }
+        onDispose { lifecycle.removeObserver(observer); model.close() }
     }
     DisposableEffect(window) {
         val originalBrightness = window?.attributes?.screenBrightness
@@ -157,6 +157,12 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         } }, update = { view ->
             view.player = model.player
             view.keepScreenOn = model.isPlaying
+            view.subtitleView?.apply {
+                setApplyEmbeddedStyles(false); setApplyEmbeddedFontSizes(false)
+                setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, model.subtitleSize)
+                setStyle(androidx.media3.ui.CaptionStyleCompat(model.subtitleColor, model.subtitleBackground, android.graphics.Color.TRANSPARENT,
+                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE, android.graphics.Color.BLACK, null))
+            }
             view.locked = locked || inPip
             view.resizeMode = when (aspect) { 1, 3 -> AspectRatioFrameLayout.RESIZE_MODE_FILL; 2 -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM; else -> AspectRatioFrameLayout.RESIZE_MODE_FIT }
             val frame = view.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
@@ -208,12 +214,13 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 TextButton(onClick = onBack) { Text("Back", color = Color.White) }
                 Text(model.activeTitle.ifBlank { title }, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 TrackMenu(model)
-                if (Build.VERSION.SDK_INT >= 26) TextButton(onClick = { host?.enterPlayerPip(true) }) { Text("PiP", color = Color.White) }
+                if (Build.VERSION.SDK_INT >= 26) TextButton(onClick = { host?.enterPlayerPip(true) }, enabled = !model.backgroundEnabled) { Text("PiP", color = Color.White) }
                 Box {
                     TextButton(onClick = { menu = true; touch() }) { Text("⋮", color = Color.White) }
                     DropdownMenu(menu, onDismissRequest = { menu = false; touch() }) {
                         PlayerViewModel.SPEEDS.forEach { rate -> DropdownMenuItem(text = { Text("${rate}x${if (rate == model.speed) " ✓" else ""}") }, onClick = { model.changeSpeed(rate); menu = false; touch() }) }
                         Row { OrientationControls(orientation) }
+                        PlayerExtraMenu(model)
                     }
                 }
             }

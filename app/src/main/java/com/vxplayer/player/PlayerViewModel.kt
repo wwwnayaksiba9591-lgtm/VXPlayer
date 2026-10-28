@@ -3,6 +3,7 @@ package com.vxplayer.player
 import android.app.Application
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
@@ -33,6 +34,32 @@ import kotlinx.coroutines.yield
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
+    private val preferences = application.getSharedPreferences("vxplayer", 0)
+    var subtitleSize by mutableStateOf(preferences.getFloat("subtitleSize", 20f))
+        private set
+    var subtitleColor by mutableStateOf(preferences.getInt("subtitleColor", android.graphics.Color.WHITE))
+        private set
+    var subtitleBackground by mutableStateOf(preferences.getInt("subtitleBackground", 0x99000000.toInt()))
+        private set
+    fun styleSubtitles(size: Float = subtitleSize, color: Int = subtitleColor, background: Int = subtitleBackground) {
+        subtitleSize = size; subtitleColor = color; subtitleBackground = background
+        preferences.edit().putFloat("subtitleSize", size).putInt("subtitleColor", color).putInt("subtitleBackground", background).apply()
+    }
+    var backgroundEnabled by mutableStateOf(false)
+        private set
+    var foreground = true
+    var aMs by mutableStateOf<Long?>(null)
+        private set
+    var bMs by mutableStateOf<Long?>(null)
+        private set
+    var sleepLabel by mutableStateOf("Off")
+        private set
+    private var sleepDeadline = 0L
+    private var sleepAtEnd = false
+    private var monitor: Job? = null
+    private var choice: TrackPreference? = null
+    private var audioRestored = false
+    private var textRestored = false
     var videoSize by mutableStateOf(VideoSize.UNKNOWN)
         private set
     var tracks by mutableStateOf(Tracks.EMPTY)
@@ -83,17 +110,27 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             } catch (_: Exception) {
                 0L
             }
+            choice = try { positions.loadChoice(selectedUri) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            audioRestored = false; textRestored = false
+            choice?.let { selected ->
+                if (savedState.get<String>("subtitleUri") == null && selected.externalUri != null) {
+                    savedState["subtitleUri"] = selected.externalUri; savedState["subtitleName"] = selected.externalName
+                }
+            }
             player = ExoPlayer.Builder(getApplication<Application>()).build().apply {
+                setWakeMode(C.WAKE_MODE_LOCAL)
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
                 setHandleAudioBecomingNoisy(true)
                 savedState.get<Bundle>("trackParameters")?.let {
                     trackSelectionParameters = TrackSelectionParameters.fromBundle(it)
                 }
+                if (choice?.textDisabled == true) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size }
                     override fun onTracksChanged(value: Tracks) {
                         tracks = value
+                        restoreTrackChoices(value)
                         if (savedState.get<Boolean>("selectExternal") == true) {
                             value.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
                                 repeat(group.length) { index ->
@@ -117,6 +154,12 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_ENDED) {
                             savePlaybackState()
+                            if (sleepAtEnd || backgroundEnabled) {
+                                sleepAtEnd = false; sleepLabel = "Off"; player?.pause()
+                                setBackground(false)
+                                if (!foreground) stop()
+                                return
+                            }
                             advance = viewModelScope.launch {
                                 yield()
                                 if (player?.playbackState == Player.STATE_ENDED) moveInPlaylist(1)
@@ -143,12 +186,78 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     savePlaybackState()
                 }
             }
+            monitor = viewModelScope.launch {
+                while (true) {
+                    delay(100)
+                    val current = player ?: break
+                    val end = bMs
+                    if (aMs != null && end != null && current.isPlaying && current.currentPosition >= end) current.seekTo(requireNotNull(aMs))
+                    if (sleepDeadline > 0L && SystemClock.elapsedRealtime() >= sleepDeadline) {
+                        sleepDeadline = 0L; sleepLabel = "Off"; current.pause(); setBackground(false)
+                        if (!foreground) { stop(); break }
+                    }
+                }
+            }
         }
+    }
+
+    private fun restoreTrackChoices(value: Tracks) {
+        val selected = choice ?: return
+        val current = player ?: return
+        listOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_TEXT).forEach { type ->
+            if ((type == C.TRACK_TYPE_AUDIO && audioRestored) || (type == C.TRACK_TYPE_TEXT && (textRestored || selected.textDisabled))) return@forEach
+            val id = if (type == C.TRACK_TYPE_AUDIO) selected.audioId else selected.textId
+            val language = if (type == C.TRACK_TYPE_AUDIO) selected.audioLanguage else selected.textLanguage
+            val candidates = value.groups.filter { it.type == type }.flatMap { group -> (0 until group.length).filter { group.isTrackSupported(it) }.map { group to it } }
+            val index = preferredTrackIndex(candidates.map { (group, track) -> group.getTrackFormat(track).let { it.id to it.language } }, id, language)
+            if (index >= 0) {
+                if (type == C.TRACK_TYPE_AUDIO) audioRestored = true else textRestored = true
+                val (group, track) = candidates[index]
+                current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(type, false)
+                    .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track)).build()
+            }
+        }
+    }
+
+    private fun rememberChoice(transform: (TrackPreference) -> TrackPreference) {
+        val uri = currentUri ?: return
+        choice = transform(choice ?: TrackPreference(uri))
+        positions.saveChoice(requireNotNull(choice))
+    }
+
+    fun setSleep(minutes: Int) {
+        sleepAtEnd = minutes == -1
+        sleepDeadline = if (minutes > 0) SystemClock.elapsedRealtime() + minutes * 60_000L else 0L
+        sleepLabel = when { minutes == -1 -> "End of video"; minutes > 0 -> "$minutes min"; else -> "Off" }
+    }
+
+    fun setA() { aMs = player?.currentPosition; bMs = null }
+    fun setB(): Boolean {
+        val start = aMs ?: return false
+        val end = player?.currentPosition ?: return false
+        if (end <= start + 500L) return false
+        bMs = end; return true
+    }
+    fun clearRepeat() { aMs = null; bMs = null }
+    fun onHidden() { foreground = false; if (!backgroundEnabled) stop() else savePlaybackState() }
+    fun close() { setBackground(false); stop() }
+
+    fun setBackground(enabled: Boolean): Boolean {
+        val current = player ?: return false
+        if (enabled) {
+            current.play()
+            if (!BackgroundPlaybackService.begin(getApplication(), current) { backgroundEnabled = false; stop() }) return false
+        } else BackgroundPlaybackService.detach(getApplication(), current)
+        backgroundEnabled = enabled
+        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, enabled).build()
+        return true
     }
 
     fun moveInPlaylist(offset: Int) {
         val next = adjacentVideo(playlist, activeUri, offset) ?: return
+        setBackground(false)
         stop()
+        clearRepeat()
         savedState.remove<Long>("position")
         savedState["playWhenReady"] = true
         savedState.remove<Bundle>("trackParameters")
@@ -176,6 +285,9 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun selectTrack(group: Tracks.Group, index: Int) {
         val current = player ?: return
         if (!group.isTrackSupported(index)) return
+        val format = group.getTrackFormat(index)
+        if (group.type == C.TRACK_TYPE_AUDIO) { audioRestored = true; rememberChoice { it.copy(audioId = format.id, audioLanguage = format.language) } }
+        if (group.type == C.TRACK_TYPE_TEXT) { textRestored = true; rememberChoice { it.copy(textId = format.id, textLanguage = format.language, textDisabled = false) } }
         if (group.type == C.TRACK_TYPE_TEXT) savedState["selectExternal"] = false
         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(group.type, false).clearOverridesOfType(group.type)
@@ -183,6 +295,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun setTrackType(type: Int, enabled: Boolean) {
+        if (type == C.TRACK_TYPE_AUDIO) { audioRestored = true; rememberChoice { it.copy(audioId = null, audioLanguage = null) } }
+        if (type == C.TRACK_TYPE_TEXT) { textRestored = true; rememberChoice { it.copy(textDisabled = !enabled, textId = null, textLanguage = null) } }
         if (type == C.TRACK_TYPE_TEXT) savedState["selectExternal"] = false
         val current = player ?: return
         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
@@ -192,9 +306,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun loadSubtitle(uri: Uri, name: String) {
         savedState["subtitleUri"] = uri.toString()
         savedState["subtitleName"] = name
+        textRestored = true
+        rememberChoice { it.copy(externalUri = uri.toString(), externalName = name, textDisabled = false, textId = "external-srt", textLanguage = null) }
         val parameters = player?.trackSelectionParameters ?: savedState.get<Bundle>("trackParameters")?.let {
             TrackSelectionParameters.fromBundle(it)
-        } ?: TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT
+        } ?: TrackSelectionParameters.Builder(getApplication<Application>()).build()
         val updated = parameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
         savedState["trackParameters"] = updated.toBundle()
@@ -245,6 +361,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun stop() {
+        monitor?.cancel(); monitor = null
         advance?.cancel()
         advance = null
         starting?.cancel()
@@ -258,7 +375,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         isPlaying = false
     }
 
-    override fun onCleared() { stop() }
+    override fun onCleared() { close() }
 
     companion object {
         val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
