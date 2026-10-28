@@ -1,8 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+}
+// Local credentials are optional and never embedded in source or BuildConfig.
+val releaseSigningFile = rootProject.file("keystore.properties")
+val releaseSigningProperties = Properties().apply {
+    if (releaseSigningFile.isFile) releaseSigningFile.inputStream().use { load(it) }
 }
 android {
     namespace = "com.vxplayer"
@@ -15,8 +22,21 @@ android {
         versionName = "1.1.0"
     }
     buildFeatures { compose = true }
+    if (releaseSigningFile.exists()) {
+        signingConfigs.create("localRelease") {
+            fun required(name: String): String = releaseSigningProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+                ?: throw GradleException("keystore.properties is missing required field: $name")
+            storeFile = rootProject.file(required("storeFile"))
+            require(storeFile?.isFile == true) { "Release signing keystore was not found." }
+            storePassword = required("storePassword")
+            keyAlias = required("keyAlias")
+            keyPassword = required("keyPassword")
+            releaseSigningProperties.getProperty("storeType")?.let { storeType = it }
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("localRelease")
             isMinifyEnabled = false
             isShrinkResources = false
         }

@@ -3,3 +3,8 @@
 **/build/
 local.properties
 .idea/
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx

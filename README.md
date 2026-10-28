@@ -26,13 +26,16 @@ $env:ANDROID_USER_HOME = "$PWD/.tools/android-user"
 Outputs:
 
 - Debug: `app/build/outputs/apk/debug/app-debug.apk`
-- Release: `app/build/outputs/apk/release/app-release-unsigned.apk`
+- Release without local signing config: `app/build/outputs/apk/release/app-release-unsigned.apk`
+- Release with local signing config: `app/build/outputs/apk/release/app-release.apk`
 
-Release minification and shrinking are disabled. Release distribution needs your own signing key. App version is `1.1.0` (code `2`). Each redesign part is built, unit-tested, and committed separately.
+Release minification and shrinking are disabled. App version is `1.1.0` (code `2`). Each implementation part is built, unit-tested, and committed separately.
+
+For signed releases, create a local `keystore.properties` in the repository root, using Java properties syntax. Supply the keys `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`; `storeType` is optional. The keystore path is resolved relative to the repository root, or may be absolute. Use forward slashes in Windows paths (or escape backslashes). Keep the actual values local. With no properties file, release builds stay unsigned; an incomplete file fails with a field-name-only error rather than silently switching keys. The properties file and common keystore extensions are gitignored. Do not force-add credentials or keystores. Distribution requires your own release key; see [Android signing guidance](https://developer.android.com/studio/publish/app-signing).
 
 ## Latest five-part theme, GUI, audio, and enhance update
 
-This pass follows the final five-part plan in the request. The earlier 13-feature advanced wishlist remains separate; this update does not add URL streaming, casting, private folders, backups, bookmarks, or the other standalone wishlist items. No network permissions were added. The only additional app permission is the normal `MODIFY_AUDIO_SETTINGS` permission for session audio effects.
+The earlier five-part pass added themes, GUI, audio boost, and video enhancement. The continuation below adds external SRT delay, streaming (including INTERNET permission), JSON backup/restore, and optional release signing. Casting, private folders, bookmarks, and other standalone wishlist items are not supplied by that five-part pass.
 
 - **Theme:** System is the default for new settings; saved choices are retained. Light and Dark use full blue/neutral Material 3 palettes with contrast-tested text roles. Android 12+ has a separate Material You dynamic-color switch; earlier devices use the static palette. The player always uses black, white controls, and a dark palette for its sheets. System-bar icon contrast follows the active screen.
 - **GUI:** shared typography, 4/8/12/16/24 dp spacing, 12–16 dp cards, consistent Material Icons, 48 dp minimum icon targets, press feedback, tab/navigation fades, larger thumbnails, resume card, gradient player scrims, and playback/track/audio/enhance bottom sheets. Existing playback and file-action behavior remains available.
@@ -93,7 +96,7 @@ The automated checks do not exercise Android audio hardware, compile/run GLSL on
 - Room stores per-URI resume positions, watched markers, the latest 20 distinct played videos, and audio/subtitle choices. Migrations preserve existing data from schema versions 1 through 3 when upgrading to version 4. Completion removes the resume checkpoint while retaining a watched marker. Default settings use app preferences.
 - Background/audio-only mode is a deliberately limited current-video handoff to a Media3 `MediaSessionService` with a media notification. It disables video rendering, prevents automatic PiP, and keeps audio and transport controls active when Home is pressed. It stops at the current video's end; it does not advance a background playlist. Back, closing the task, or turning the mode off ends the service handoff. It does not attempt to resurrect playback after process death. Normal foreground/PiP playback still has folder auto-next.
 - Subtitle appearance is configurable. External SRT attachments and track choices are remembered per URI when the document provider grants persistent access. Unsupported or missing track choices fall back to automatic selection.
-- Subtitle delay controls are deferred: the pinned Media3 1.6.1 `SubtitleConfiguration` has no public subtitle timestamp offset API. Adding a no-op control or replacing the text renderer would be misleading or invasive. A future Media3 upgrade can add this separately. See the [pinned Media3 source](https://github.com/androidx/media/blob/1.6.1/libraries/common/src/main/java/androidx/media3/common/MediaItem.java).
+- External SRT delay uses a custom loading path that shifts cue timings before passing a cached SRT to Media3. Embedded subtitle delay remains unsupported: the pinned Media3 1.6.1 has no public subtitle timestamp offset setter. See the [pinned Media3 source](https://github.com/androidx/media/blob/1.6.1/libraries/common/src/main/java/androidx/media3/common/MediaItem.java).
 - Rename/delete use Android 11+ write/delete consent requests, Android 10 recoverable consent, or legacy write permission on Android 7–9. Cancellation and access failures leave the app usable. No broad all-files permission is requested.
 
 ## Existing playback regression checklist
@@ -168,3 +171,37 @@ These checks remain unverified until a device or emulator is available. Unit tes
 
 - Feature 8: Library menu > Open URL supports HTTP/HTTPS files, HLS, and DASH. Select the stream type for extensionless playlists. Recent URLs are limited to 20 and can be cleared. INTERNET is requested only for streaming; HTTP cleartext is enabled for user-supplied HTTP links. DRM licensing, browser logins, and custom request headers are unsupported.
 - Feature 9 deferred: safe private moves need consent-aware removal, interruption recovery/rollback, and migration of URI-keyed playback data. The current MediaStore library has no private-file repository or move journal. A copy-only or authentication-only screen would leave public originals visible and give a misleading privacy promise. No private-folder or encryption claim is exposed.
+- Feature 10: Settings > Backup and restore exports portable playback defaults, appearance/audio/enhance preferences, library layout/sort, external SRT delays, and Room resume positions. Restore validates the whole versioned JSON first, then asks for confirmation and merges by key/URI. The Room merge is transactional and ordered with pending saves; preferences are a separate storage operation. Existing history/track choices remain. No videos, document grants, recent URL list, or warning acknowledgements are backed up. Resume positions may contain complete stream URLs/tokens. Files are unencrypted, limited to 4 MiB, 10,000 positions and 2,048 settings. A URI must still refer to the same accessible video on the target device.
+- Feature 11: release signing is optional via local, ignored keystore.properties. Missing config produces an unsigned APK; incomplete config fails clearly. No release key or real signing credential is supplied by this repository.
+
+### Continuation device-check checklist
+
+Features 1–5 were left outside this continuation as requested. This checkout started from the earlier theme/enhancement commits; it did not contain commits for the new thumbnail-preview/bookmark/screenshot/shuffle/equalizer features. This continuation does not claim to implement those features.
+
+- [ ] **6 — SRT delay:** load an external UTF-8 SRT, then UTF-16 with BOM; use +/-100 ms and Reset. Positive delay must show cues later. Test a cue crossing an hour boundary, a negative shift crossing zero, and a file with all cues shifted before zero. Embedded tracks must remain unchanged and the limitation must be visible.
+- [ ] **6 — playback regression:** adjust delay while paused/playing; position, speed, selected audio, and subtitle Off must remain correct. Seek, rotate, PiP, toggle audio-only mode, change folder videos, and reopen each video. Verify per-URI delay persists. Test malformed/oversized SRT, revoked grant, replacement file, rapid taps, and picker return during player recreation; failures must not crash playback or change the original file.
+- [ ] **7 — deferred:** verify existing current-video background audio still plays on Home with notification controls and stops on Back as documented. A library mini player is not available until service ownership is refactored.
+- [ ] **8 — URLs:** with and without library media permission, open HTTPS MP4, HTTP MP4, HLS .m3u8 and DASH .mpd, including query parameters. Test extensionless playlists with explicit HLS/DASH. Verify fullscreen, audio/subtitle tracks, rotation, PiP, background audio, speed, seek, and VOD resume. Check live streams without a seekable timeline.
+- [ ] **8 — failures/history:** try malformed links, unsupported schemes, expired links/HTTP errors, unsupported media, offline connection, and Retry after connectivity returns. Cancel the sheet. Open over 20 distinct links; verify deduplication, recent ordering, persistence, selection, and Clear. Verify the HTTP/token-storage explanation. Browser logins, DRM license configuration, and custom headers are unsupported.
+- [ ] **9 — deferred:** no private-folder action or encryption promise is available. Existing public videos, MediaStore rename/delete consent, and folder browsing must remain unchanged. A future private feature must test authentication and transactional move/recovery before removing originals.
+- [ ] **10 — backup:** change theme/defaults/audio/enhance/sort/layout and save positions in multiple videos. Export through local and cloud document providers; cancel once and verify the app remains usable. Inspect JSON for settings/resume only; it must contain no media bytes or signing credentials. Treat file paths and URL tokens as private.
+- [ ] **10 — restore:** validate, cancel, then confirm import. Settings apply immediately, matching positions overwrite, other positions/history remain, and resume works when URIs/grants match. Try missing videos, a new device, malformed/version-mismatched/oversized/duplicate-field/out-of-range files and denied provider access. Invalid input must make no changes; test low-storage failure and the partial-restore message. Rotate during picker, validation, and confirmation.
+- [ ] **11 — release:** with no keystore.properties, build assembleRelease and confirm unsigned output. With a valid local release key/config, build again and verify the APK certificate with apksigner, then install/upgrade using the same real key. Test missing fields/wrong key path gracefully fail. Confirm git ignores all local signing files and no secrets are staged.
+- [ ] **Full regression:** install debug and locally signed release builds; repeat fullscreen/cutout, folder playlist, gestures, tracks, resume, theme contrast, 200% boost warning, enhancement presets, rotation, PiP, background audio, and lifecycle release checks from the earlier sections.
+
+Automated checks cover SRT timing, URL validation/history policy, strict JSON round trips and rejection, and persistence import ordering/failure recovery. Runtime decoding/network connections, subtitle rendering, document providers, audio hardware, GPU effects, PiP/rotation, and installation with a real release key still require a device/emulator.
+
+### Files changed in this continuation
+
+- Player subtitle loading/controls: `player/SrtTiming.kt`, `player/ShiftedSubtitleCache.kt`, `player/TrackMenu.kt`, and `player/PlayerViewModel.kt`. PlayerViewModel/PlayerScreen also supply readable stream errors and Retry.
+- Library streaming: `library/StreamUrls.kt`, `library/OpenUrlSheet.kt`, and `library/LibraryScreen.kt` implement validation, bounded recent links, and the Open URL action without changing folder navigation.
+- Backup: `settings/BackupCodec.kt`, `settings/BackupControls.kt`, `settings/SettingsScreen.kt`, `settings/AppSettings.kt`, and `player/PlaybackPositionStore.kt` add strict JSON, picker/confirmation UI, instant defaults reload, and serialized transactional resume import. No Room schema change is needed.
+- Build/security: `gradle/libs.versions.toml`, `app/build.gradle.kts`, `app/src/main/AndroidManifest.xml`, and `.gitignore` add pinned HLS/DASH/Gson dependencies, streaming access/HTTP policy, and optional local release signing.
+- Tests: `SrtTimingTest.kt`, `StreamUrlsTest.kt`, `BackupCodecTest.kt`, and `PlaybackPositionStoreTest.kt` cover timing, validation/history, JSON, and import ordering/error recovery. This README records limitations and device checks.
+
+### Automated verification for this continuation
+
+- `.\.tools\check.ps1`: assembleDebug and 40 unit tests pass (zero failures).
+- `.\gradlew.bat assembleRelease`: passes with minification/shrinking off and no local signing configuration.
+- Optional signing branch: smoke-built with the existing local debug test certificate and verified using apksigner (APK v2 signature). The temporary configuration/test-signed APK was removed, and unsigned release output rebuilt. This is not verification with a real distribution key; no release key was created or committed.
+- `adb devices`: no connected device. All unchecked runtime/device items above remain unverified.
