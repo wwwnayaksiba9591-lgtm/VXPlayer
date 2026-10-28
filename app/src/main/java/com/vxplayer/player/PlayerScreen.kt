@@ -79,6 +79,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     var interaction by remember { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var speedSheet by remember { mutableStateOf(false) }
+    var enhanceSheet by remember { mutableStateOf(false) }
     var aspect by rememberSaveable { mutableIntStateOf(defaults.aspect) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var brightness by rememberSaveable { mutableFloatStateOf(-1f) }
@@ -108,8 +109,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             delay(250)
         }
     }
-    LaunchedEffect(controls, interaction, model.isPlaying, menu, speedSheet, model.choosingSubtitle, swiping, slider) {
-        if (controls && model.isPlaying && !menu && !speedSheet && !model.choosingSubtitle && !swiping && slider == null) { delay(3000); controls = false }
+    LaunchedEffect(controls, interaction, model.isPlaying, menu, speedSheet, enhanceSheet, model.choosingSubtitle, swiping, slider) {
+        if (controls && model.isPlaying && !menu && !speedSheet && !enhanceSheet && !model.choosingSubtitle && !swiping && slider == null) { delay(3000); controls = false }
     }
     LaunchedEffect(indicatorTick, swiping, heldSpeed) { if (!swiping && heldSpeed == null) { delay(1000); indicator = null } }
     LaunchedEffect(pulseTick) {
@@ -134,6 +135,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         onDispose { host?.canEnterPip = { false }; host?.releaseHiddenPlayer = {}; host?.updatePip() }
     }
     LaunchedEffect(host, model.isPlaying, model.choosingSubtitle, model.backgroundEnabled) { host?.updatePip() }
+    LaunchedEffect(inPip) { model.setPipActive(inPip) }
     DisposableEffect(lifecycle, uri) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -245,6 +247,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 if (Build.VERSION.SDK_INT >= 26) VXIconButton(Icons.Default.PictureInPictureAlt, "Picture in picture", { host?.enterPlayerPip(true) }, enabled = !model.backgroundEnabled && model.player != null)
                 VXIconButton(Icons.Default.MoreVert, "Playback options", { menu = true; touch() })
             }
+            if (model.enhanceOn) Text("Enhance on", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 24.dp, bottom = 8.dp))
         }
         PlayerExtraMenu(model, show = menu && !inPip, onDismiss = { menu = false; touch() },
             onSpeed = { menu = false; speedSheet = true; touch() }, orientationLocked = orientation.locked,
@@ -255,6 +258,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 touch()
             })
         if (speedSheet && !inPip) SpeedSheet(model) { speedSheet = false; touch() }
+        if (enhanceSheet && !inPip) EnhanceSheet(model) { enhanceSheet = false; touch() }
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().overlayVisible(visible, locked || inPip)
             .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .55f), Color.Black.copy(alpha = .9f))))
             .safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -282,6 +286,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 VXIconButton(Icons.Default.AspectRatio, "Aspect ratio: ${listOf("Fit", "Fill", "Zoom", "100%")[aspect]}", {
                     aspect = (aspect + 1) % 4; zoom = 1f; feedback(listOf("Fit", "Fill", "Zoom", "100%")[aspect]); touch()
                 })
+                if (model.videoEnhancer.available && !model.backgroundEnabled) VXIconButton(Icons.Default.AutoAwesome, "Enhance video", { enhanceSheet = true; touch() }, enabled = model.player != null)
                 VXIconButton(Icons.Default.ScreenRotation, "Rotate video", {
                     orientation.locked = true; orientation.requested = if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; touch()
                 })

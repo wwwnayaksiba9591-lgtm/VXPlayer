@@ -36,6 +36,13 @@ import kotlinx.coroutines.yield
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
     val audioEnhancer = AudioEnhancer(application)
+    val videoEnhancer = VideoEnhancer(application)
+    var enhanceOn by mutableStateOf(false)
+        private set
+    private var pipActive = false
+    private var repaint: Job? = null
+    private var rebuilding: Job? = null
+    private var effectsConfigured = false
     var notice by mutableStateOf<String?>(null)
         private set
     private val preferences = application.getSharedPreferences("vxplayer", 0)
@@ -102,6 +109,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["activeTitle"] = activeTitle
         currentUri = selectedUri
         audioEnhancer.newVideo(selectedUri)
+        videoEnhancer.newVideo(selectedUri)
         starting = viewModelScope.launch {
             if (playlist.isEmpty()) {
                 playlist = try { withContext(Dispatchers.IO) { loadFolderPlaylist(getApplication(), folder) } }
@@ -148,9 +156,10 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 if (choice?.textDisabled == true) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
                     override fun onAudioSessionIdChanged(audioSessionId: Int) { audioEnhancer.attach(audioSessionId) }
-                    override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size }
+                    override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size; checkEnhancePath() }
                     override fun onTracksChanged(value: Tracks) {
                         tracks = value
+                        checkEnhancePath()
                         restoreTrackChoices(value)
                         if (savedState.get<Boolean>("selectExternal") == true) {
                             value.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
@@ -166,7 +175,15 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
                         savedState["trackParameters"] = parameters.toBundle()
                     }
-                    override fun onPlayerError(error: PlaybackException) { failed = true }
+                    override fun onPlayerError(error: PlaybackException) {
+                        val current = player
+                        if (effectsConfigured && current != null) {
+                            videoEnhancer.unavailable("Enhancement is unsupported on this video path; playing the original.")
+                            enhanceOn = false
+                            effectsConfigured = false
+                            rebuildEnhancementPlayer(videoEnhancer.reason)
+                        } else failed = true
+                    }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@PlayerViewModel.isPlaying = playing
                         if (playing) currentUri?.let { positions.recordPlayed(it, activeTitle) }
@@ -199,6 +216,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 seekTo(position.coerceAtLeast(0L))
                 setPlaybackSpeed(this@PlayerViewModel.speed)
                 playWhenReady = savedState.get<Boolean>("playWhenReady") ?: true
+                configureEnhancement(this, force = true)
                 prepare()
             }
             checkpoint = viewModelScope.launch {
@@ -219,6 +237,76 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         if (!foreground) { stop(); break }
                     }
                 }
+            }
+        }
+    }
+
+    private fun checkEnhancePath() {
+        val current = player ?: return
+        val format = current.videoFormat ?: return
+        val transfer = format.colorInfo?.colorTransfer
+        if (transfer == C.COLOR_TRANSFER_ST2084 || transfer == C.COLOR_TRANSFER_HLG || format.drmInitData != null) {
+            videoEnhancer.unavailable("Enhancement is unavailable for HDR or protected video.")
+            notice = videoEnhancer.reason
+            configureEnhancement(current)
+        }
+    }
+
+    private fun configureEnhancement(current: ExoPlayer, force: Boolean = false) {
+        videoEnhancer.updateSuspended(pipActive || backgroundEnabled)
+        val wanted = shouldEnhance(videoEnhancer.enabled, videoEnhancer.values, videoEnhancer.available, pipActive, backgroundEnabled)
+        if (force && !wanted) {
+            // Leave untouched playback on ExoPlayer's ordinary, non-GL output path.
+            effectsConfigured = false; enhanceOn = false
+            return
+        }
+        if (!force && !effectsConfigured) {
+            if (wanted) rebuildEnhancementPlayer()
+            return
+        }
+        if (!force && wanted == enhanceOn) return
+        try {
+            current.setVideoEffects(if (wanted) listOf(videoEnhancer.effect) else emptyList())
+            effectsConfigured = true
+            enhanceOn = wanted
+        } catch (_: RuntimeException) {
+            enhanceOn = false
+            videoEnhancer.unavailable("Enhancement is unavailable on this device; playing the original.")
+            notice = videoEnhancer.reason
+            try { current.setVideoEffects(emptyList()) } catch (_: RuntimeException) { }
+        }
+    }
+
+    private fun rebuildEnhancementPlayer(explanation: String? = null) {
+        if (rebuilding?.isActive == true) return
+        val current = player ?: return
+        val uri = currentUri ?: return
+        val position = current.currentPosition.coerceAtLeast(0L)
+        val playing = current.playWhenReady
+        if (backgroundEnabled) setBackground(false)
+        rebuilding = viewModelScope.launch {
+            yield()
+            stop()
+            savedState["position"] = position
+            savedState["playWhenReady"] = playing && foreground
+            start(Uri.parse(uri), activeTitle)
+            if (explanation != null) notice = explanation
+        }
+    }
+
+    fun setPipActive(value: Boolean) { pipActive = value; player?.let { configureEnhancement(it) } }
+    fun updateEnhance(value: EnhanceValues) { videoEnhancer.change(value); refreshEnhancement() }
+    fun enableEnhance(enabled: Boolean) { videoEnhancer.changeEnabled(enabled); refreshEnhancement() }
+    fun presetEnhance(name: String) { videoEnhancer.selectPreset(name); refreshEnhancement() }
+    private fun refreshEnhancement() {
+        player?.let { configureEnhancement(it) }
+        repaint?.cancel()
+        repaint = viewModelScope.launch {
+            delay(120)
+            val current = player
+            if (current != null && !current.isPlaying && current.playbackState == Player.STATE_READY && foreground && !backgroundEnabled && !pipActive) {
+                val target = current.currentPosition + 1L
+                current.seekTo(if (current.duration > 0L) target.coerceAtMost(current.duration) else target)
             }
         }
     }
@@ -271,6 +359,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             if (!BackgroundPlaybackService.begin(getApplication(), current) { backgroundEnabled = false; stop() }) return false
         } else BackgroundPlaybackService.detach(getApplication(), current)
         backgroundEnabled = enabled
+        configureEnhancement(current)
         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, enabled).build()
         return true
     }
@@ -383,6 +472,10 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun stop() {
+        rebuilding?.cancel(); rebuilding = null
+        effectsConfigured = false
+        repaint?.cancel(); repaint = null
+        enhanceOn = false
         audioEnhancer.release()
         monitor?.cancel(); monitor = null
         advance?.cancel()

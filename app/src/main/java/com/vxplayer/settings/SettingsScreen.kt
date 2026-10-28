@@ -41,6 +41,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Switch(settings.dynamicColor, onCheckedChange = { checked -> store.update { it.copy(dynamicColor = checked) } })
             }
             HorizontalDivider()
+            Text("Video", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Remember enhance settings", modifier = Modifier.weight(1f))
+                Switch(settings.rememberEnhance, onCheckedChange = { checked -> store.update { it.copy(rememberEnhance = checked) } })
+            }
             Text("Audio", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Allow volume boost above 100%", modifier = Modifier.weight(1f))

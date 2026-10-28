@@ -23,15 +23,19 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     var dialog by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var audioSheet by remember { mutableStateOf(false) }
+    var enhanceSheet by remember { mutableStateOf(false) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (!model.setBackground(true)) message = "Background playback could not start."
     }
     if (audioSheet) AudioEnhanceSheet(model) { audioSheet = false }
+    if (enhanceSheet) EnhanceSheet(model) { enhanceSheet = false }
     if (show) ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
     Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
     DropdownMenuItem(text = { Text("Speed · ${model.speed}×") }, onClick = onSpeed)
     DropdownMenuItem(text = { Text("Audio enhance · ${model.audioEnhancer.percent}%") }, onClick = { onDismiss(); audioSheet = true })
+    if (model.videoEnhancer.available) DropdownMenuItem(text = { Text("Video enhance · ${model.videoEnhancer.preset}") }, onClick = { onDismiss(); enhanceSheet = true })
+    else DropdownMenuItem(text = { Text(model.videoEnhancer.reason.orEmpty()) }, onClick = {}, enabled = false)
     DropdownMenuItem(text = { Text(if (orientationLocked) "Unlock orientation" else "Lock orientation") }, onClick = onOrientation)
     DropdownMenuItem(text = { Text("Sleep timer: ${model.sleepLabel}") }, onClick = { dialog = "sleep" })
     DropdownMenuItem(text = { Text(if (model.backgroundEnabled) "Stop background/audio-only play" else "Background/audio-only play") }, onClick = {
