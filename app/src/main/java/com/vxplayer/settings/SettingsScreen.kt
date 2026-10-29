@@ -45,11 +45,11 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             HorizontalDivider()
             Text("Gestures", style = MaterialTheme.typography.titleMedium)
-            SettingChoice("Seek swipe sensitivity", settings.seekSensitivity.name,
-                com.vxplayer.player.SeekSensitivity.entries.map { it.name }) { label ->
-                store.update { it.copy(seekSensitivity = com.vxplayer.player.SeekSensitivity.valueOf(label)) }
+            SettingChoice("Seek swipe sensitivity", settings.seekSensitivity.label,
+                com.vxplayer.player.SeekSensitivity.entries.map { it.label }) { label ->
+                store.update { it.copy(seekSensitivity = com.vxplayer.player.SeekSensitivity.entries.first { level -> level.label == label }) }
             }
-            Text("Full-width swipe: Low 30 s · Medium 60 s · High 120 s", style = MaterialTheme.typography.bodySmall)
+            Text("Full-width swipe: Low 60 s · Medium 120 s · High 240 s", style = MaterialTheme.typography.bodySmall)
             Text("Video", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Remember enhance settings", modifier = Modifier.weight(1f))

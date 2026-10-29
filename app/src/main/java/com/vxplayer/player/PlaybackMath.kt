@@ -1,6 +1,10 @@
 package com.vxplayer.player
 
-enum class SeekSensitivity(val seconds: Int) { Low(30), Medium(60), High(120) }
+// Persisted names stay stable: existing Low/Medium/High selections automatically use the new scale.
+enum class SeekSensitivity(val seconds: Int) {
+    Low(60), Medium(120), High(240);
+    val label get() = "$name · $seconds s / full width"
+}
 
 fun seekPreview(start: Long, distanceDp: Float, widthDp: Float, duration: Long,
     sensitivity: SeekSensitivity = SeekSensitivity.Medium): Long {
