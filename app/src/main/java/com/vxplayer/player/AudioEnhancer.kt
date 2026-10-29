@@ -5,6 +5,8 @@ import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import android.media.audiofx.BassBoost
 import android.media.audiofx.LoudnessEnhancer
+import android.media.audiofx.Virtualizer
+import android.media.audiofx.Equalizer
 import android.os.Build
 import androidx.compose.runtime.*
 import com.vxplayer.settings.AppSettings
@@ -25,6 +27,11 @@ class AudioEnhancer(context: Context) {
     private var loudness: LoudnessEnhancer? = null
     private var bass: BassBoost? = null
     private var dynamics: AudioEffect? = null
+    private var virtualizer: Virtualizer? = null
+    private var equalizer: Equalizer? = null
+    private var smart: SmartAudioProfile? = null
+    var smartAvailable by mutableStateOf(false)
+        private set
     private var desiredOnAttach = 100
     var percent by mutableIntStateOf(systemPercent())
         private set
@@ -69,8 +76,12 @@ class AudioEnhancer(context: Context) {
         bassAvailable = bass != null
         dynamics = if (Build.VERSION.SDK_INT >= 28) try { createNightCompression(id) } catch (_: RuntimeException) { null } else null
         nightAvailable = dynamics != null
+        virtualizer = try { Virtualizer(0, id).also { if (!it.strengthSupported) { it.release(); error("Unavailable") } } } catch (_: RuntimeException) { null }
+        equalizer = try { Equalizer(0, id) } catch (_: RuntimeException) { null }
+        smartAvailable = bass != null || dynamics != null || virtualizer != null || equalizer != null
         updateBass(bassStrength)
         updateNight(night)
+        applySmartEffects()
         // A remembered boost must still respect the warning and current settings.
         request(if (desired > 100) desired else systemPercent())
     }
@@ -127,8 +138,9 @@ class AudioEnhancer(context: Context) {
         prefs.edit().putInt("bassStrength", bassStrength).apply()
         try {
             bass?.let { effect ->
-                effect.setStrength(bassStrength.toShort())
-                check(effect.setEnabled(bassStrength > 0) == AudioEffect.SUCCESS)
+                val effective = maxOf(bassStrength, smart?.bass ?: 0)
+                effect.setStrength(effective.toShort())
+                check(effect.setEnabled(effective > 0) == AudioEffect.SUCCESS)
             }
         } catch (_: RuntimeException) {
             try { bass?.release() } catch (_: RuntimeException) { }
@@ -137,11 +149,42 @@ class AudioEnhancer(context: Context) {
     }
     fun updateNight(enabled: Boolean) {
         night = enabled; prefs.edit().putBoolean("nightAudio", enabled).apply()
-        try { dynamics?.let { check(it.setEnabled(enabled) == AudioEffect.SUCCESS) } }
+        try { dynamics?.let { check(it.setEnabled(enabled || smart?.night == true) == AudioEffect.SUCCESS) } }
         catch (_: RuntimeException) {
             try { dynamics?.release() } catch (_: RuntimeException) { }
             dynamics = null; nightAvailable = false; message = "Night audio is unavailable on this output."
         }
+    }
+    fun smartProfile(mode: String?, active: Boolean) {
+        smart = if (active && mode != null) smartAudioProfile(mode) else null
+        applySmartEffects()
+    }
+    fun supportsSmart(mode: String): Boolean {
+        val profile = smartAudioProfile(mode)
+        return (bass != null && profile.bass > 0) || (virtualizer != null && profile.spatial > 0) ||
+            equalizer != null || (dynamics != null && profile.night)
+    }
+    private fun applySmartEffects() {
+        // Smart profiles layer over the user's manual audio settings without saving over them.
+        try { bass?.let { effect ->
+            val value = maxOf(bassStrength, smart?.bass ?: 0)
+            effect.setStrength(value.toShort()); check(effect.setEnabled(value > 0) == AudioEffect.SUCCESS)
+        } } catch (_: RuntimeException) { runCatching { bass?.release() }; bass = null; bassAvailable = false }
+        try { dynamics?.let { check(it.setEnabled(night || smart?.night == true) == AudioEffect.SUCCESS) } }
+        catch (_: RuntimeException) { runCatching { dynamics?.release() }; dynamics = null; nightAvailable = false }
+        try { virtualizer?.let { effect ->
+            effect.setStrength((smart?.spatial ?: 0).toShort()); check(effect.setEnabled(smart != null) == AudioEffect.SUCCESS)
+        } } catch (_: RuntimeException) { runCatching { virtualizer?.release() }; virtualizer = null }
+        try { equalizer?.let { effect ->
+            val range = effect.bandLevelRange
+            for (band in 0 until effect.numberOfBands) {
+                val frequency = effect.getCenterFreq(band.toShort()) / 1000
+                val mb = smart?.let { if (frequency < 250) it.lowMb else if (frequency > 4000) it.highMb else it.midMb } ?: 0
+                effect.setBandLevel(band.toShort(), mb.coerceIn(range[0].toInt(), range[1].toInt()).toShort())
+            }
+            check(effect.setEnabled(smart != null) == AudioEffect.SUCCESS)
+        } } catch (_: RuntimeException) { runCatching { equalizer?.release() }; equalizer = null }
+        smartAvailable = bass != null || dynamics != null || virtualizer != null || equalizer != null
     }
     private fun disableGain() {
         val effect = loudness ?: return
@@ -152,8 +195,9 @@ class AudioEnhancer(context: Context) {
         }
     }
     fun release() {
-        listOfNotNull(loudness, bass, dynamics).forEach { try { it.release() } catch (_: RuntimeException) { } }
+        listOfNotNull(loudness, bass, dynamics, virtualizer, equalizer).forEach { try { it.release() } catch (_: RuntimeException) { } }
         loudness = null; bass = null; dynamics = null; session = 0
+        virtualizer = null; equalizer = null; smartAvailable = false
         boostAvailable = false; bassAvailable = false; nightAvailable = false
         warning = false; pendingWarning = null
     }

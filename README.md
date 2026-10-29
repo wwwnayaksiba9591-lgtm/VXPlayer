@@ -35,6 +35,16 @@ For signed releases, create a local `keystore.properties` in the repository root
 
 ## Current update: seek, folder playback, subtitle delay, and Private
 
+### Smart Enhance one-tap update
+
+Smart Enhance is directly in the main player row: a tap toggles the last mode (Auto by default), long press or the chevron opens modes, and A/B holds the original without changing saved settings. The shader is prepared with neutral values so toggles update uniforms rather than rebuilding playback. Supported session-bound Virtualizer, BassBoost, Equalizer, and Night compression accompany the mode; unsupported effects are skipped independently. Manual boost/audio settings remain separate. Auto analyzes a 32×18 frame locally every 1.5 seconds on a worker thread, smooths within safe limits, and falls back to gentle fixed values when sampling is unavailable. Sampling and Smart profiles are suspended in PiP/background audio and restored afterwards. Actual effect latency and hardware support require a device.
+
+- [ ] Tap once: ON in Auto/last mode, accented filled icon and mode chip; tap again: OFF/Original, outlined icon. No sheet or dialog opens.
+- [ ] Long press and chevron both open the sheet. Try Auto, Vivid, Cinema, Sports/Action, Anime/Cartoon, Night, Original without closing the sheet; use Close. Compare video and audio through speakers and headphones; unsupported audio effects silently skip.
+- [ ] Hold A/B and release/cancel: original video/audio only while held; enhanced values return without changing the remembered mode. Expand Advanced, adjust/reset sliders, and compare paused/playing.
+- [ ] Test dark/bright/colorful scenes in Auto for stable, bounded changes. Test unavailable sampling/HDR/protected video and devices without audio effects: original playback remains usable; unsupported video must not disable supported audio.
+- [ ] With Remember enhance settings enabled/disabled, change videos and restart. Test ON during rotation, Home/PiP, background audio, subtitle loading, private playback, and repeated decoder recreation. No audiofx or capture objects may leak.
+
 Each part below was built and unit-tested with `.\.tools\check.ps1` before its commit. Device checks remain unchecked because `adb devices` reports no connected phone or emulator.
 
 - **Part 1 — swipe seek:** `PlaybackMath.kt`, `GesturePlayerView.kt`, `PlayerScreen.kt`, and the settings/backup files replace duration-based seeking with a dp-based fixed time scale. Settings > Gestures > Seek swipe sensitivity offers Low (30 s), Medium (60 s, default), and High (120 s) per screen width. A 16 dp dead zone is removed from the effective distance; diagonal movement must clearly favor an axis before it locks. Preview updates while dragging, release seeks, cancellation discards the target. Double-tap and the seek bar retain their existing behavior.

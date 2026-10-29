@@ -25,7 +25,8 @@ object BackupCodec {
         "playbackMode" to setOf("Off", "RepeatOne", "RepeatFolder", "Shuffle"),
         "defaultOrientation" to setOf("Auto", "System", "Portrait", "Landscape"),
         "sort" to setOf("Name", "Date", "Size", "Duration"),
-        "enhancePreset" to setOf("Original", "Vivid", "Cinema", "Soft", "Sharp", "Night", "Custom"))
+        "enhancePreset" to setOf("Auto", "Original", "Vivid", "Cinema", "Sports/Action", "Anime/Cartoon", "Soft", "Sharp", "Night", "Custom"),
+        "smartLastMode" to setOf("Auto", "Vivid", "Cinema", "Sports/Action", "Anime/Cartoon", "Night", "Custom"))
     private val delayKey = Regex("srtDelay:[0-9a-f]{64}")
     fun supports(key: String) = key in booleans || key in floats || key in integers || key in choices || delayKey.matches(key)
 

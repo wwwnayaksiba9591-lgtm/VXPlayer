@@ -48,8 +48,7 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     DropdownMenuItem(text = { Text("Folder playback · ${model.playbackMode.label}") },
         leadingIcon = { Icon(playbackModeIcon(model.playbackMode), null) }, onClick = { model.cyclePlaybackMode() })
     DropdownMenuItem(text = { Text("Audio enhance · ${model.audioEnhancer.percent}%") }, onClick = { onDismiss(); audioSheet = true })
-    if (model.videoEnhancer.available) DropdownMenuItem(text = { Text("Video enhance · ${model.videoEnhancer.preset}") }, onClick = { onDismiss(); enhanceSheet = true })
-    else DropdownMenuItem(text = { Text(model.videoEnhancer.reason.orEmpty()) }, onClick = {}, enabled = false)
+    DropdownMenuItem(text = { Text("Smart Enhance · ${model.videoEnhancer.preset}") }, onClick = { onDismiss(); enhanceSheet = true })
     DropdownMenuItem(text = { Text(if (orientationLocked) "Unlock orientation" else "Lock orientation") }, onClick = onOrientation)
     DropdownMenuItem(text = { Text("Sleep timer: ${model.sleepLabel}") }, onClick = { dialog = "sleep" })
     if (!model.isPrivatePlayback) DropdownMenuItem(text = { Text(if (model.backgroundEnabled) "Stop background/audio-only play" else "Background/audio-only play") }, onClick = {

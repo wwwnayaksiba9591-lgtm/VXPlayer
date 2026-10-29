@@ -69,6 +69,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     val host = activity as? MainActivity
     val inPip = host?.pipMode == true
     val context = LocalContext.current
+    var playerView by remember { mutableStateOf<GesturePlayerView?>(null) }
     val defaults by AppSettings.get(context).state.collectAsStateWithLifecycle()
     val window = activity?.window
     val orientation = rememberOrientationController()
@@ -101,6 +102,17 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     fun feedback(text: String) { indicator = text; indicatorTick++ }
     fun touch() { interaction++ }
     LaunchedEffect(model.notice) { model.notice?.let { feedback(it) } }
+    LaunchedEffect(playerView, model.player, model.isPlaying, model.videoEnhancer.enabled,
+        model.videoEnhancer.lastMode, model.videoEnhancer.suspended, model.videoEnhancer.comparing, model.videoEnhancer.available) {
+        val view = playerView
+        val engine = model.videoEnhancer
+        if (view != null && model.isPlaying && engine.enabled && engine.available && engine.lastMode == "Auto" && !engine.suspended && !engine.comparing) {
+            while (true) {
+                if (model.foreground && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.autoEnhanceSample(sampleVideoFrame(view))
+                delay(1500)
+            }
+        }
+    }
     BackHandler(locked && !inPip) { unlockVisible = true; touch() }
     LaunchedEffect(model.player) {
         while (true) {
@@ -183,6 +195,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     CompositionLocalProvider(LocalContentColor provides Color.White) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx -> GesturePlayerView(ctx).apply {
+            playerView = this
             useController = false
             setEnableComposeSurfaceSyncWorkaround(true)
             layoutParams = android.view.ViewGroup.LayoutParams(-1, -1)
@@ -247,7 +260,9 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 if (Build.VERSION.SDK_INT >= 26 && host != null && !model.isPrivatePlayback) VXIconButton(Icons.Default.PictureInPictureAlt, "Picture in picture", { host.enterPlayerPip(true) }, enabled = !model.backgroundEnabled && model.player != null)
                 VXIconButton(Icons.Default.MoreVert, "Playback options", { menu = true; touch() })
             }
-            if (model.enhanceOn) Text("Enhance on", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 24.dp, bottom = 8.dp))
+            if (model.videoEnhancer.enabled) Text("Smart Enhance: ${model.videoEnhancer.lastMode}${if (model.videoEnhancer.comparing) " · Original preview" else ""}",
+                color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 24.dp, bottom = 8.dp).background(Color.Black.copy(alpha = .6f), RoundedCornerShape(12.dp)).padding(6.dp))
         }
         PlayerExtraMenu(model, show = menu && !inPip, onDismiss = { menu = false; touch() },
             onSpeed = { menu = false; speedSheet = true; touch() }, orientationLocked = orientation.locked,
@@ -276,6 +291,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+                SmartEnhanceControl(model, openModes = { enhanceSheet = true }, touch = { touch() })
                 VXIconButton(Icons.Default.Lock, "Lock controls", { locked = true; controls = false; unlockVisible = true; touch() })
                 VXIconButton(Icons.Default.SkipPrevious, "Previous video", { model.moveInPlaylist(-1); touch() }, enabled = model.player != null && model.canMoveInPlaylist(-1))
                 FilledIconButton(onClick = { model.player?.let { if (it.isPlaying) it.pause() else it.play() }; touch() },
@@ -290,7 +306,6 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 VXIconButton(Icons.Default.AspectRatio, "Aspect ratio: ${listOf("Fit", "Fill", "Zoom", "100%")[aspect]}", {
                     aspect = (aspect + 1) % 4; zoom = 1f; feedback(listOf("Fit", "Fill", "Zoom", "100%")[aspect]); touch()
                 })
-                if (model.videoEnhancer.available && !model.backgroundEnabled) VXIconButton(Icons.Default.AutoAwesome, "Enhance video", { enhanceSheet = true; touch() }, enabled = model.player != null)
                 VXIconButton(Icons.Default.ScreenRotation, "Rotate video", {
                     orientation.locked = true; orientation.requested = if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE; touch()
                 })

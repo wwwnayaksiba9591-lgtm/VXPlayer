@@ -10,11 +10,14 @@ class VideoEnhancer(context: Context) {
     private val prefs = app.getSharedPreferences("vxplayer", 0)
     private val gpuSupported = (app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).deviceConfigurationInfo.reqGlEsVersion >= 0x20000
     private val remember = AppSettings.get(app).state.value.rememberEnhance
-    var values by mutableStateOf(if (remember) EnhanceValues(prefs.getFloat("enhanceBrightness", 0f), prefs.getFloat("enhanceContrast", 0f), prefs.getFloat("enhanceSaturation", 1f), prefs.getFloat("enhanceSharpness", 0f), prefs.getFloat("enhanceWarmth", 0f)).bounded() else EnhanceValues())
+    private var state by mutableStateOf(SmartEnhanceState(prefs.getBoolean("enhanceEnabled", false),
+        smartMode(prefs.getString("smartLastMode", prefs.getString("enhancePreset", "Auto"))).takeUnless { it == "Original" } ?: "Auto").restored(remember))
+    var values by mutableStateOf(if (remember && state.lastMode == "Custom") EnhanceValues(prefs.getFloat("enhanceBrightness", 0f), prefs.getFloat("enhanceContrast", 0f), prefs.getFloat("enhanceSaturation", 1f), prefs.getFloat("enhanceSharpness", 0f), prefs.getFloat("enhanceWarmth", 0f)).bounded() else ENHANCE_PRESETS[state.lastMode] ?: ENHANCE_PRESETS.getValue("Auto"))
         private set
-    var enabled by mutableStateOf(remember && prefs.getBoolean("enhanceEnabled", false))
-        private set
-    var preset by mutableStateOf(if (remember) prefs.getString("enhancePreset", "Original").orEmpty() else "Original")
+    val enabled get() = state.enabled
+    val lastMode get() = state.lastMode
+    val preset get() = if (enabled) lastMode else "Original"
+    var comparing by mutableStateOf(false)
         private set
     var reason by mutableStateOf<String?>(if (gpuSupported) null else "Video enhancement is unavailable on this GPU.")
         private set
@@ -24,26 +27,31 @@ class VideoEnhancer(context: Context) {
     val parameters = LiveEnhanceParameters()
     val effect = LiveVideoEffect(parameters)
     private var lastUri: String? = null
-    init { parameters.values = values }
+    init { publish() }
     fun newVideo(uri: String) {
         if (lastUri != uri) {
             reason = if (gpuSupported) null else "Video enhancement is unavailable on this GPU."
-            if (!AppSettings.get(app).state.value.rememberEnhance) { values = EnhanceValues(); enabled = false; preset = "Original" }
+            if (!AppSettings.get(app).state.value.rememberEnhance) { state = SmartEnhanceState(); values = ENHANCE_PRESETS.getValue("Auto") }
         }
-        lastUri = uri; publish()
+        comparing = false; lastUri = uri; publish()
     }
-    fun change(value: EnhanceValues) { values = value.bounded(); preset = "Custom"; publish(); persist() }
-    fun changeEnabled(value: Boolean) { enabled = value; publish(); persist() }
+    fun change(value: EnhanceValues) { values = value.bounded(); state = state.select("Custom"); publish(); persist() }
+    fun changeEnabled(value: Boolean) { state = state.copy(enabled = value); publish(); persist() }
     fun selectPreset(name: String) {
         val selected = ENHANCE_PRESETS[name] ?: return
-        values = selected; preset = name; enabled = name != "Original"; publish(); persist()
+        if (name != "Original") values = selected
+        state = state.select(name); publish(); persist()
+    }
+    fun compare(original: Boolean) { comparing = original; publish() }
+    fun autoAdjust(frame: FrameSummary?) {
+        if (enabled && lastMode == "Auto" && available && !suspended && !comparing) { values = smoothAutoEnhance(values, frame); publish() }
     }
     fun updateSuspended(value: Boolean) { suspended = value; publish() }
     fun unavailable(message: String) { reason = message; publish() }
-    private fun publish() { parameters.values = if (enabled && available && !suspended) values else EnhanceValues() }
+    private fun publish() { parameters.values = if (enabled && available && !suspended && !comparing) values else EnhanceValues() }
     private fun persist() {
         if (!AppSettings.get(app).state.value.rememberEnhance) return
-        prefs.edit().putBoolean("enhanceEnabled", enabled).putString("enhancePreset", preset)
+        prefs.edit().putBoolean("enhanceEnabled", enabled).putString("enhancePreset", preset).putString("smartLastMode", lastMode)
             .putFloat("enhanceBrightness", values.brightness).putFloat("enhanceContrast", values.contrast).putFloat("enhanceSaturation", values.saturation)
             .putFloat("enhanceSharpness", values.sharpness).putFloat("enhanceWarmth", values.warmth).apply()
     }

@@ -215,7 +215,10 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build()
                 if (choice?.textDisabled == true) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
-                    override fun onAudioSessionIdChanged(audioSessionId: Int) { audioEnhancer.attach(audioSessionId) }
+                    override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                        audioEnhancer.attach(audioSessionId)
+                        player?.let { configureEnhancement(it) }
+                    }
                     override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size; checkEnhancePath() }
                     override fun onTracksChanged(value: Tracks) {
                         tracks = value
@@ -319,34 +322,26 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         val transfer = format.colorInfo?.colorTransfer
         if (transfer == C.COLOR_TRANSFER_ST2084 || transfer == C.COLOR_TRANSFER_HLG || format.drmInitData != null) {
             videoEnhancer.unavailable("Enhancement is unavailable for HDR or protected video.")
-            notice = videoEnhancer.reason
             configureEnhancement(current)
         }
     }
 
     private fun configureEnhancement(current: ExoPlayer, force: Boolean = false) {
         videoEnhancer.updateSuspended(pipActive || backgroundEnabled)
-        val wanted = shouldEnhance(videoEnhancer.enabled, videoEnhancer.values, videoEnhancer.available, pipActive, backgroundEnabled)
-        if (force && !wanted) {
-            // Leave untouched playback on ExoPlayer's ordinary, non-GL output path.
-            effectsConfigured = false; enhanceOn = false
-            return
+        val active = videoEnhancer.enabled && !videoEnhancer.comparing && !videoEnhancer.suspended
+        audioEnhancer.smartProfile(videoEnhancer.lastMode, active)
+        if (force) {
+            effectsConfigured = false
+            if (videoEnhancer.available) try {
+                // Keep one neutral shader installed from preparation. Taps change uniforms only.
+                current.setVideoEffects(listOf(videoEnhancer.effect))
+                effectsConfigured = true
+            } catch (_: RuntimeException) {
+                videoEnhancer.unavailable("Video effects are unavailable on this device.")
+                runCatching { current.setVideoEffects(emptyList()) }
+            }
         }
-        if (!force && !effectsConfigured) {
-            if (wanted) rebuildEnhancementPlayer()
-            return
-        }
-        if (!force && wanted == enhanceOn) return
-        try {
-            current.setVideoEffects(if (wanted) listOf(videoEnhancer.effect) else emptyList())
-            effectsConfigured = true
-            enhanceOn = wanted
-        } catch (_: RuntimeException) {
-            enhanceOn = false
-            videoEnhancer.unavailable("Enhancement is unavailable on this device; playing the original.")
-            notice = videoEnhancer.reason
-            try { current.setVideoEffects(emptyList()) } catch (_: RuntimeException) { }
-        }
+        enhanceOn = active && ((videoEnhancer.available && effectsConfigured) || audioEnhancer.supportsSmart(videoEnhancer.lastMode))
     }
 
     private fun rebuildEnhancementPlayer(explanation: String? = null) {
@@ -370,11 +365,19 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun updateEnhance(value: EnhanceValues) { videoEnhancer.change(value); refreshEnhancement() }
     fun enableEnhance(enabled: Boolean) { videoEnhancer.changeEnabled(enabled); refreshEnhancement() }
     fun presetEnhance(name: String) { videoEnhancer.selectPreset(name); refreshEnhancement() }
+    fun toggleSmartEnhance() {
+        enableEnhance(!videoEnhancer.enabled)
+        notice = if (!videoEnhancer.enabled) "Smart Enhance OFF"
+            else if (!videoEnhancer.available && !audioEnhancer.supportsSmart(videoEnhancer.lastMode)) "Not supported on this device"
+            else "Smart Enhance ON - ${videoEnhancer.lastMode}"
+    }
+    fun compareEnhance(original: Boolean) { videoEnhancer.compare(original); refreshEnhancement() }
+    fun autoEnhanceSample(frame: FrameSummary?) { videoEnhancer.autoAdjust(frame) }
     private fun refreshEnhancement() {
         player?.let { configureEnhancement(it) }
         repaint?.cancel()
         repaint = viewModelScope.launch {
-            delay(120)
+            delay(16)
             val current = player
             if (current != null && !current.isPlaying && current.playbackState == Player.STATE_READY && foreground && !backgroundEnabled && !pipActive) {
                 val target = current.currentPosition + 1L
