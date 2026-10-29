@@ -30,6 +30,9 @@ class AudioEnhancer(context: Context) {
     private var virtualizer: Virtualizer? = null
     private var equalizer: Equalizer? = null
     private var smart: SmartAudioProfile? = null
+    private var blocked = false
+    val effectsInUse get() = listOfNotNull(loudness, bass, dynamics, virtualizer, equalizer).any { runCatching { it.enabled }.getOrDefault(false) }
+    fun blockEffects(value: Boolean) { blocked = value; if (value) release() }
     var smartAvailable by mutableStateOf(false)
         private set
     private var desiredOnAttach = 100
@@ -65,6 +68,7 @@ class AudioEnhancer(context: Context) {
         percent = systemPercent()
     }
     fun attach(id: Int) {
+        if (blocked) return
         if (id == session && id > 0) return
         val desired = if (session > 0) percent else desiredOnAttach
         release()

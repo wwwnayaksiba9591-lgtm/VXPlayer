@@ -41,9 +41,11 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     }
     if (audioSheet) AudioEnhanceSheet(model) { audioSheet = false }
     if (enhanceSheet) EnhanceSheet(model) { enhanceSheet = false }
+    if (dialog == "report") PlaybackProblemDialog(model.problemReport()) { dialog = null }
     if (show) ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
     Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+    DropdownMenuItem(text = { Text("Media info / Playback problem report") }, onClick = { dialog = "report" })
     DropdownMenuItem(text = { Text("Speed · ${model.speed}×") }, onClick = onSpeed)
     DropdownMenuItem(text = { Text("Folder playback · ${model.playbackMode.label}") },
         leadingIcon = { Icon(playbackModeIcon(model.playbackMode), null) }, onClick = { model.cyclePlaybackMode() })

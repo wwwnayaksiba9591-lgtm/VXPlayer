@@ -66,9 +66,9 @@ fun TrackMenu(model: PlayerViewModel) {
                 groups.forEach { group ->
                     repeat(group.length) { index ->
                         DropdownMenuItem(
-                            text = { Text(names.getTrackName(group.getTrackFormat(index))) },
+                            text = { Text(names.getTrackName(group.getTrackFormat(index)) + if (!group.isTrackSupported(index, false)) " · Unsupported" else "") },
                             modifier = Modifier.semantics { selected = group.isTrackSelected(index) },
-                            enabled = group.isTrackSupported(index),
+                            enabled = group.isTrackSupported(index, false),
                             onClick = { model.selectTrack(group, index); expanded = false },
                         )
                     }
@@ -77,6 +77,14 @@ fun TrackMenu(model: PlayerViewModel) {
             DropdownMenuItem(text = { Text(stringResource(R.string.load_subtitle)) },
                 onClick = { expanded = false; model.choosingSubtitle = true; picker.launch(arrayOf("*/*")) })
             HorizontalDivider()
+            if (model.hasExternalSrt) {
+                var encodings by remember { mutableStateOf(false) }
+                TextButton(onClick = { encodings = !encodings }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("SRT encoding: ${model.subtitleEncoding}") }
+                if (encodings) Column(Modifier.padding(horizontal = 16.dp)) {
+                    SubtitleText.encodings.forEach { encoding -> TextButton(onClick = { model.changeSubtitleEncoding(encoding); encodings = false }) { Text(encoding) } }
+                }
+                Text("Auto detection is best-effort. Choose the encoding if legacy captions look wrong.", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+            }
             Text("Subtitle delay", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
             if (model.canDelayExternalSubtitle) {
             Text("${if (model.subtitleDelayMs >= 0) "+" else ""}${model.subtitleDelayMs} ms", modifier = Modifier.padding(horizontal = 16.dp))

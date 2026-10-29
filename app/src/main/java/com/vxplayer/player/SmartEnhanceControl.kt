@@ -26,11 +26,11 @@ fun SmartEnhanceControl(model: PlayerViewModel, openModes: () -> Unit, touch: ()
             onClick = { model.toggleSmartEnhance(); touch() }, onLongClick = { openModes(); touch() })
             .semantics { contentDescription = "Enhance"; stateDescription = if (engine.enabled) "On, ${engine.lastMode}" else "Off" },
             contentAlignment = Alignment.Center) {
-            Icon(if (engine.enabled) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome, null,
-                tint = if (engine.enabled) accent else Color.White)
+            Icon(if (engine.enabled && !model.enhancementUnavailable) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome, null,
+                tint = if (engine.enabled && !model.enhancementUnavailable) accent else Color.White)
         }
         VXIconButton(Icons.Default.ExpandMore, "Smart Enhance modes", { openModes(); touch() })
-        if (engine.enabled) {
+        if (engine.enabled && !model.enhancementUnavailable) {
             DisposableEffect(model) { onDispose { model.compareEnhance(false) } }
             Box(Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 .semantics { contentDescription = "Hold A/B to compare with original" }

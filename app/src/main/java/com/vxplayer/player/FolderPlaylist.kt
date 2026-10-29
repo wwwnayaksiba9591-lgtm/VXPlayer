@@ -14,8 +14,9 @@ fun adjacentVideo(videos: List<PlaylistVideo>, current: String?, offset: Int): P
 
 internal fun loadFolderPlaylist(context: Context, folder: String): List<PlaylistVideo> {
     if (folder.isBlank()) return emptyList()
-    val collection = if (Build.VERSION.SDK_INT >= 29) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+    val volume = folder.substringBefore(':', "external")
+    val bucket = folder.substringAfter(':', folder)
+    val collection = MediaStore.Files.getContentUri(volume)
     val result = mutableListOf<PlaylistVideo>()
     val preferences = context.getSharedPreferences("vxplayer", 0)
     val column = when (preferences.getString("sort", "Name")) {
@@ -27,9 +28,16 @@ internal fun loadFolderPlaylist(context: Context, folder: String): List<Playlist
     val direction = if (preferences.getBoolean("descending", false)) "DESC" else "ASC"
     val order = "$column $direction, ${MediaStore.Video.Media.DISPLAY_NAME} COLLATE NOCASE $direction"
     context.contentResolver.query(collection,
-        arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME),
-        "${MediaStore.Video.Media.BUCKET_ID} = ?", arrayOf(folder), order)?.use {
-        while (it.moveToNext()) result.add(PlaylistVideo(ContentUris.withAppendedId(collection, it.getLong(0)).toString(), it.getString(1).orEmpty()))
+        arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Files.FileColumns.MEDIA_TYPE),
+        "${MediaStore.Video.Media.BUCKET_ID} = ? AND (${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR " +
+            com.vxplayer.library.VIDEO_EXTENSIONS.joinToString(" OR ") { "LOWER(${MediaStore.MediaColumns.DISPLAY_NAME}) LIKE ?" } + ")",
+        arrayOf(bucket, MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()) + com.vxplayer.library.VIDEO_EXTENSIONS.map { "%.$it" }, order)?.use {
+        while (it.moveToNext()) {
+            val actual = if (it.getInt(2) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO) {
+                if (volume == "external_primary" || volume == "external") MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Video.Media.getContentUri(volume)
+            } else collection
+            result.add(PlaylistVideo(ContentUris.withAppendedId(actual, it.getLong(0)).toString(), it.getString(1).orEmpty()))
+        }
     }
     return result
 }

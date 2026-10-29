@@ -9,7 +9,7 @@ import java.security.MessageDigest
 fun subtitleDelayKey(videoUri: String): String = "srtDelay:" + MessageDigest.getInstance("SHA-256").digest(videoUri.toByteArray()).joinToString("") { "%02x".format(it) }
 
 object ShiftedSubtitleCache {
-    fun prepare(context: Context, source: Uri, delayMs: Int, protectedUri: Uri?): Uri {
+    fun prepare(context: Context, source: Uri, delayMs: Int, protectedUri: Uri?, encoding: String = "Auto"): Uri {
         val bytes = context.contentResolver.openInputStream(source)?.use { input ->
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
@@ -21,12 +21,7 @@ object ShiftedSubtitleCache {
             }
             output.toByteArray()
         } ?: error("Subtitle is not readable")
-        val charset = when {
-            bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() -> Charsets.UTF_16LE
-            bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() -> Charsets.UTF_16BE
-            else -> Charsets.UTF_8
-        }
-        val shifted = SrtTiming.shift(bytes.toString(charset), delayMs)
+        val shifted = SrtTiming.shift(SubtitleText.decode(bytes, encoding), delayMs)
         val digest = MessageDigest.getInstance("SHA-256").digest((source.toString() + delayMs + shifted).toByteArray()).joinToString("") { "%02x".format(it) }
         val directory = File(context.cacheDir, "shifted-subtitles").apply { mkdirs() }
         val file = File(directory, "$digest.srt")

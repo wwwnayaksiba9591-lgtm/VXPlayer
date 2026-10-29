@@ -27,7 +27,8 @@ fun EnhanceSheet(model: PlayerViewModel, onDismiss: () -> Unit) {
                 Column(Modifier.weight(1f)) { Text("Smart Enhance", style = MaterialTheme.typography.titleLarge); Text(engine.preset, style = MaterialTheme.typography.bodySmall) }
                 Switch(engine.enabled, onCheckedChange = { model.enableEnhance(it) })
             }
-            if (!engine.available && !model.audioEnhancer.smartAvailable) Text("Not supported on this device", color = MaterialTheme.colorScheme.error)
+            if (model.enhancementUnavailable) Text(engine.reason ?: "Unavailable for this video", color = MaterialTheme.colorScheme.error)
+            else if (!engine.available && !model.audioEnhancer.smartAvailable) Text("Not supported on this device", color = MaterialTheme.colorScheme.error)
             if (engine.suspended) Text("Enhancement is suspended in PiP and audio-only mode.")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ENHANCE_PRESETS.keys.forEach { name -> FilterChip(engine.preset == name, onClick = { model.presetEnhance(name) }, label = { Text(name) }) }

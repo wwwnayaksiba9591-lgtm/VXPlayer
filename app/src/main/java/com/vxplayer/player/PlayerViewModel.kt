@@ -28,6 +28,8 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.HttpDataSource
 import com.vxplayer.library.StreamPageProbe
@@ -50,6 +52,22 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private var repaint: Job? = null
     private var rebuilding: Job? = null
     private var effectsConfigured = false
+    private val diagnostics = PlaybackDiagnostics()
+    private var sourceFormat: androidx.media3.common.Format? = null
+    private var formatUri: String? = null
+    private var warmingAttempted = false
+    private var effectsDisabled by mutableStateOf(false)
+    val enhancementUnavailable get() = effectsDisabled || sourceFormat?.let(::videoEffectsUnsafe) == true
+    var audioWarning by mutableStateOf<String?>(null)
+        private set
+    var subtitleEncoding by mutableStateOf("Auto")
+        private set
+    private var pendingBackgroundReplacement: ExoPlayer? = null
+    private var sourceSize = 0L
+    private var muteProblemAudio = false
+    private val failedAudioFormats = mutableSetOf<String>()
+    private fun audioFormatKey(format: androidx.media3.common.Format) = "${format.sampleMimeType}|${format.codecs}|${format.channelCount}|${format.sampleRate}"
+    private fun effectsKey(uri: String) = "effectsDisabled:" + subtitleDelayKey(uri).substringAfter(':')
     var notice by mutableStateOf<String?>(null)
         private set
     private val preferences = application.getSharedPreferences("vxplayer", 0)
@@ -134,6 +152,26 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         player?.prepare()
         player?.play()
     }
+    fun playWithoutEnhance() {
+        disableEffectsForVideo("Enhancement is unavailable for this video; playing without effects.")
+        if (player != null) rebuildEnhancementPlayer(videoEnhancer.reason)
+    }
+    private fun disableEffectsForVideo(reason: String) {
+        effectsDisabled = true
+        currentUri?.let { preferences.edit().putBoolean(effectsKey(it), true).apply() }
+        videoEnhancer.unavailable(reason)
+        audioEnhancer.blockEffects(true)
+        enhanceOn = false
+    }
+    fun problemReport(): String = diagnostics.report(activeTitle, currentUri?.startsWith("http", true) == true,
+        isPrivatePlayback, sourceSize, sourceFormat ?: player?.videoFormat, tracks,
+        "video=$effectsConfigured, audio=${audioEnhancer.effectsInUse}, blocked=$effectsDisabled, sampling=${videoEnhancer.enabled && videoEnhancer.available && videoEnhancer.lastMode == "Auto"}")
+    fun changeSubtitleEncoding(value: String) {
+        if (value !in SubtitleText.encodings) return
+        subtitleEncoding = value
+        currentUri?.let { preferences.edit().putString("srtEncoding:${subtitleDelayKey(it)}", value).apply() }
+        reloadExternalSubtitle(select = false)
+    }
     var isPlaying by mutableStateOf(false)
         private set
     var speed by mutableStateOf(savedState.get<Float>("speed") ?: AppSettings.get(application).state.value.speed)
@@ -158,6 +196,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["activeUri"] = selectedUri
         savedState["activeTitle"] = activeTitle
         currentUri = selectedUri
+        if (formatUri != selectedUri) {
+            formatUri = selectedUri; sourceFormat = null; warmingAttempted = false; diagnostics.reset(); sourceSize = 0
+            muteProblemAudio = false; failedAudioFormats.clear()
+        }
+        if (!muteProblemAudio) audioWarning = null
+        effectsDisabled = preferences.getBoolean(effectsKey(selectedUri), false)
+        audioEnhancer.blockEffects(effectsDisabled)
         privateId = PrivateRepository.privateId(getApplication(), Uri.parse(selectedUri))
         if (isPrivatePlayback && !PrivateAccess.unlocked) {
             failed = true; failureMessage = "Unlock Private to play this video."; return
@@ -165,21 +210,32 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         subtitleDelayMs = preferences.getInt(subtitleDelayKey(selectedUri), 0).coerceIn(-60_000, 60_000)
         audioEnhancer.newVideo(selectedUri)
         videoEnhancer.newVideo(selectedUri)
+        if (effectsDisabled) videoEnhancer.unavailable("Enhancement is unavailable for this video after a playback problem.")
+        subtitleEncoding = preferences.getString("srtEncoding:${subtitleDelayKey(selectedUri)}", "Auto")?.takeIf { it in SubtitleText.encodings } ?: "Auto"
         starting = viewModelScope.launch {
+            if (!selectedUri.startsWith("http", true)) sourceSize = withContext(Dispatchers.IO) {
+                runCatching { getApplication<Application>().contentResolver.openFileDescriptor(Uri.parse(selectedUri), "r")?.use { it.statSize.coerceAtLeast(0) } ?: 0L }.getOrDefault(0L)
+            }
             if (playlist.isEmpty()) {
                 playlist = try { withContext(Dispatchers.IO) { loadFolderPlaylist(getApplication(), folder) } }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { emptyList() }
                 if (playlist.none { it.uri == selectedUri }) playlist = listOf(PlaylistVideo(selectedUri, activeTitle))
             }
+            val resumeAlias = if (!isPrivatePlayback && !selectedUri.startsWith("http", true)) withContext(Dispatchers.IO) {
+                com.vxplayer.library.legacyResumeAlias(getApplication(), Uri.parse(selectedUri))
+            } else null
             val position = savedState.get<Long>("position") ?: try {
-                privateId?.let { privatePositions.getLong(it, 0L) } ?: positions.load(selectedUri) ?: 0L
+                privateId?.let { privatePositions.getLong(it, 0L) } ?: positions.load(selectedUri) ?: resumeAlias?.let { alias ->
+                    positions.load(alias)?.also { old -> positions.save(selectedUri, old); positions.save(alias, 0) }
+                } ?: 0L
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 0L
             }
-            choice = try { positions.loadChoice(selectedUri) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            choice = try { positions.loadChoice(selectedUri) ?: resumeAlias?.let { positions.loadChoice(it)?.copy(uri = selectedUri) } }
+                catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
             audioRestored = false; textRestored = false
             choice?.let { selected ->
                 if (savedState.get<String>("subtitleUri") == null && selected.externalUri != null) {
@@ -201,7 +257,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             hasExternalSrt = savedState.get<String>("subtitleUri") != null
             savedState.get<String>("subtitleUri")?.let { source ->
                 try {
-                    preparedSubtitle = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), subtitleDelayMs, preparedSubtitle) }
+                    preparedSubtitle = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), subtitleDelayMs, preparedSubtitle, subtitleEncoding) }
                     preparedSource = source; preparedDelay = subtitleDelayMs
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) {
@@ -210,11 +266,17 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 }
             }
             val networkApproved = userMediaSessionAllowed(selectedUri, preferences.contains("streamType:$selectedUri"))
-            player = ExoPlayer.Builder(getApplication<Application>())
+            val renderers = object : DefaultRenderersFactory(getApplication<Application>()) {
+                override fun getCodecAdapterFactory(): androidx.media3.exoplayer.mediacodec.MediaCodecAdapter.Factory =
+                    diagnostics.trackAdapters(super.getCodecAdapterFactory())
+            }.setEnableDecoderFallback(true).setMediaCodecSelector(diagnostics.selector)
+            player = ExoPlayer.Builder(getApplication<Application>(), renderers)
                 .setUsePlatformDiagnostics(false)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(directMediaFactory(getApplication(), networkApproved))
                     .setLoadErrorHandlingPolicy(DirectMediaLoadErrorPolicy()))
                 .build().apply {
+                val owner = this
+                addAnalyticsListener(diagnostics.listener)
                 setWakeMode(C.WAKE_MODE_LOCAL)
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
@@ -223,18 +285,29 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     trackSelectionParameters = TrackSelectionParameters.fromBundle(it)
                 }
                 // Audio-only is an explicit live-session mode, never a restored video default.
-                trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build()
+                trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, backgroundEnabled).build()
+                if (muteProblemAudio) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
                 if (choice?.textDisabled == true) trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
                 addListener(object : Player.Listener {
                     override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                        if (player !== owner) return
                         audioEnhancer.attach(audioSessionId)
                         player?.let { configureEnhancement(it) }
                     }
-                    override fun onVideoSizeChanged(size: VideoSize) { this@PlayerViewModel.videoSize = size; checkEnhancePath() }
+                    override fun onVideoSizeChanged(size: VideoSize) { if (player === owner) { this@PlayerViewModel.videoSize = size; checkEnhancePath() } }
                     override fun onTracksChanged(value: Tracks) {
+                        if (player !== owner) return
                         tracks = value
                         checkEnhancePath()
                         restoreTrackChoices(value)
+                        ensureSupportedAudio(value)
+                        val videoGroups = value.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+                        if (!backgroundEnabled && videoGroups.isNotEmpty() && videoGroups.none { group -> (0 until group.length).any { group.isTrackSupported(it, true) } }) {
+                            failed = true
+                            failureMessage = "Video format is not supported on this device: ${videoGroups.first().getTrackFormat(0).let(::formatDetails)}"
+                            diagnostics.capabilityFailure(videoGroups.first().getTrackFormat(0))
+                            owner.pause()
+                        }
                         if (savedState.get<Boolean>("selectExternal") == true) {
                             value.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
                                 repeat(group.length) { index ->
@@ -247,26 +320,48 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         }
                     }
                     override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
+                        if (player !== owner) return
                         savedState["trackParameters"] = parameters.toBundle()
                     }
                     override fun onPlayerError(error: PlaybackException) {
+                        if (player !== owner) return
                         val current = player
+                        val usedEffects = effectsConfigured || audioEnhancer.effectsInUse
+                        diagnostics.record(error, usedEffects)
                         val causes = generateSequence<Throwable>(error) { it.cause }.take(20).toList()
-                        if (causes.any { it is HttpDataSource.InvalidContentTypeException && StreamPageProbe.isHtml(it.contentType) }) {
+                        val failedFormat = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat
+                        if (shouldRetryWithoutEffects(usedEffects, effectsDisabled)) {
+                            disableEffectsForVideo("Enhancement is unavailable for this video after a playback error. Playing without effects.")
+                            rebuildEnhancementPlayer(videoEnhancer.reason)
+                        } else if (failedFormat?.sampleMimeType?.startsWith("audio/") == true && !muteProblemAudio) {
+                            failedAudioFormats.add(audioFormatKey(failedFormat))
+                            val alternative = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.any { group ->
+                                (0 until group.length).any { group.isTrackSupported(it, false) && audioFormatKey(group.getTrackFormat(it)) !in failedAudioFormats }
+                            }
+                            if (!alternative || failedAudioFormats.size >= 8) {
+                                muteProblemAudio = true
+                                audioWarning = "Audio format ${failedFormat.sampleMimeType} is not supported on this device"
+                                owner.trackSelectionParameters = owner.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
+                            } else ensureSupportedAudio(tracks)
+                            rebuildEnhancementPlayer(if (muteProblemAudio) audioWarning else "Trying another supported audio track.")
+                        } else if (hasExternalSrt && (causes.any { it.javaClass.simpleName.contains("Subtitle", true) } ||
+                                (error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat?.sampleMimeType?.let(MimeTypes::isText) == true)) {
+                            savedState.remove<String>("subtitleUri"); savedState.remove<String>("subtitleName")
+                            hasExternalSrt = false; preparedSubtitle = null; preparedSource = null
+                            rememberChoice { it.copy(externalUri = null, externalName = null, textId = null, textDisabled = true) }
+                            rebuildEnhancementPlayer("Subtitle failed; playing the video without external subtitles.")
+                        } else if (causes.any { it is HttpDataSource.InvalidContentTypeException && StreamPageProbe.isHtml(it.contentType) }) {
                             failureMessage = StreamPageProbe.HTML_MESSAGE
                             failed = true; current?.pause()
-                        } else if (effectsConfigured && current != null && (error.errorCode in 4000..4999 || error.errorCode in 7000..7999 ||
-                                causes.any { it is androidx.media3.common.VideoFrameProcessingException })) {
-                            videoEnhancer.unavailable("Enhancement is unsupported on this video path; playing the original.")
-                            enhanceOn = false
-                            effectsConfigured = false
-                            rebuildEnhancementPlayer(videoEnhancer.reason)
                         } else {
                             val httpError = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
                             failureMessage = if (httpError != null) when (httpError.responseCode) {
                                 403 -> "Access denied (403). This link may require permission or may have expired."
                                 404 -> "Video not found (404). Check the link."
                                 else -> "The media server returned HTTP ${httpError.responseCode}. Retry or check the link."
+                            } else if (error.errorCode in 4000..4999) {
+                                val format = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat ?: sourceFormat
+                                "The device could not decode this format after decoder fallback. ${format?.let(::formatDetails) ?: "Codec details are available in Copy report."}"
                             } else if (selectedUri.startsWith("http", true)) when (error.errorCode) {
                                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Could not connect. Check your connection and retry."
                                 PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The server rejected this link. It may have expired or need authentication."
@@ -276,11 +371,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         }
                     }
                     override fun onIsPlayingChanged(playing: Boolean) {
+                        if (player !== owner) return
                         this@PlayerViewModel.isPlaying = playing
                         if (playing && !isPrivatePlayback) currentUri?.let { positions.recordPlayed(it, activeTitle) }
                         if (!playing) savePlaybackState()
                     }
                     override fun onPlaybackStateChanged(state: Int) {
+                        if (player !== owner) return
                         buffering = state == Player.STATE_BUFFERING
                         if (state == Player.STATE_ENDED) {
                             savePlaybackState()
@@ -297,19 +394,34 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         }
                     }
                     override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                        if (player !== owner) return
                         savePlaybackState()
                     }
                     override fun onPlaybackParametersChanged(parameters: PlaybackParameters) {
+                        if (player !== owner) return
                         speed = parameters.speed
                         savedState["speed"] = parameters.speed
                     }
                 })
                 setMediaItem(buildMediaItem(Uri.parse(selectedUri), activeTitle))
                 seekTo(position.coerceAtLeast(0L))
+                setSeekParameters(if (preferSyncSeek(sourceFormat?.containerMimeType, activeTitle)) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
                 setPlaybackSpeed(this@PlayerViewModel.speed)
-                playWhenReady = savedState.get<Boolean>("playWhenReady") ?: true
+                playWhenReady = pendingBackgroundReplacement == null && (savedState.get<Boolean>("playWhenReady") ?: true)
                 configureEnhancement(this, force = true)
                 prepare()
+            }
+            pendingBackgroundReplacement?.let { previous ->
+                pendingBackgroundReplacement = null
+                val replacement = requireNotNull(player)
+                if (BackgroundPlaybackService.replaceForRecovery(previous, replacement)) {
+                    replacement.playWhenReady = savedState.get<Boolean>("playWhenReady") ?: true
+                } else {
+                    backgroundEnabled = false; replacement.pause()
+                    BackgroundPlaybackService.detach(getApplication(), previous)
+                    notice = "Background recovery paused. Return to VXPlayer to resume."
+                }
+                previous.release()
             }
             val originalSubtitle = savedState.get<String>("subtitleUri")
             if (originalSubtitle != null && (preparedSource != originalSubtitle || preparedDelay != subtitleDelayMs ||
@@ -340,21 +452,32 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
 
     private fun checkEnhancePath() {
         val current = player ?: return
-        val format = current.videoFormat ?: return
-        val transfer = format.colorInfo?.colorTransfer
-        if (transfer == C.COLOR_TRANSFER_ST2084 || transfer == C.COLOR_TRANSFER_HLG || format.drmInitData != null) {
-            videoEnhancer.unavailable("Enhancement is unavailable for HDR or protected video.")
-            configureEnhancement(current)
+        val videoGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+        val format = current.videoFormat ?: videoGroups.firstOrNull()?.getTrackFormat(0) ?: return
+        sourceFormat = format
+        current.setSeekParameters(if (preferSyncSeek(format.containerMimeType, activeTitle)) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
+        if (videoEffectsUnsafe(format)) {
+            videoEnhancer.unavailable("Smart Enhance is unavailable for HDR, 10-bit or protected video.")
+            audioEnhancer.smartProfile(null, false)
+            if (effectsConfigured && !effectsDisabled) {
+                disableEffectsForVideo(videoEnhancer.reason.orEmpty())
+                rebuildEnhancementPlayer(videoEnhancer.reason)
+            }
+        } else if (!warmingAttempted && !effectsDisabled && foreground && !backgroundEnabled &&
+            videoGroups.any { group -> (0 until group.length).any { group.isTrackSupported(it, true) } }) {
+            warmingAttempted = true
+            rebuildEnhancementPlayer()
         }
+        configureEnhancement(current)
     }
 
     private fun configureEnhancement(current: ExoPlayer, force: Boolean = false) {
         videoEnhancer.updateSuspended(pipActive || backgroundEnabled)
-        val active = videoEnhancer.enabled && !videoEnhancer.comparing && !videoEnhancer.suspended
+        val active = videoEnhancer.enabled && !enhancementUnavailable && sourceFormat != null && !videoEnhancer.comparing && !videoEnhancer.suspended
         audioEnhancer.smartProfile(videoEnhancer.lastMode, active)
         if (force) {
             effectsConfigured = false
-            if (videoEnhancer.available) try {
+            if (videoEnhancer.available && sourceFormat != null && !enhancementUnavailable) try {
                 // Keep one neutral shader installed from preparation. Taps change uniforms only.
                 current.setVideoEffects(listOf(videoEnhancer.effect))
                 effectsConfigured = true
@@ -370,14 +493,15 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         if (rebuilding?.isActive == true) return
         val current = player ?: return
         val uri = currentUri ?: return
-        val position = current.currentPosition.coerceAtLeast(0L)
-        val playing = current.playWhenReady
-        if (backgroundEnabled) setBackground(false)
+        val wasBackground = backgroundEnabled
         rebuilding = viewModelScope.launch {
             yield()
-            stop()
+            val position = current.currentPosition.coerceAtLeast(0L)
+            val playing = current.playWhenReady
+            rebuilding = null // stop must not cancel the recovery coroutine itself.
+            stop(keepBackgroundPlayer = wasBackground)
             savedState["position"] = position
-            savedState["playWhenReady"] = playing && foreground
+            savedState["playWhenReady"] = playing && (foreground || wasBackground)
             start(Uri.parse(uri), activeTitle)
             if (explanation != null) notice = explanation
         }
@@ -388,6 +512,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun enableEnhance(enabled: Boolean) { videoEnhancer.changeEnabled(enabled); refreshEnhancement() }
     fun presetEnhance(name: String) { videoEnhancer.selectPreset(name); refreshEnhancement() }
     fun toggleSmartEnhance() {
+        if (enhancementUnavailable) { notice = "Smart Enhance is unavailable for this video"; return }
         enableEnhance(!videoEnhancer.enabled)
         notice = if (!videoEnhancer.enabled) "Smart Enhance OFF"
             else if (!videoEnhancer.available && !audioEnhancer.supportsSmart(videoEnhancer.lastMode)) "Not supported on this device"
@@ -395,6 +520,31 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
     fun compareEnhance(original: Boolean) { videoEnhancer.compare(original); refreshEnhancement() }
     fun autoEnhanceSample(frame: FrameSummary?) { videoEnhancer.autoAdjust(frame) }
+    private fun ensureSupportedAudio(value: Tracks) {
+        val current = player ?: return
+        if (muteProblemAudio) {
+            if (!current.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) current.trackSelectionParameters =
+                current.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
+            return
+        }
+        val candidates = value.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+            .flatMap { group -> (0 until group.length).map { group to it } }
+        if (candidates.isEmpty()) { audioWarning = null; return }
+        val selected = candidates.indexOfFirst { (group, index) -> group.isTrackSelected(index) }
+        val index = supportedAudioIndex(candidates.map { (group, index) -> group.isTrackSupported(index, false) && audioFormatKey(group.getTrackFormat(index)) !in failedAudioFormats }, selected)
+        if (index < 0) {
+            audioWarning = "Audio format ${candidates.map { it.first.getTrackFormat(it.second).sampleMimeType ?: "unknown" }.distinct().joinToString()} is not supported on this device"
+            if (!current.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) current.trackSelectionParameters =
+                current.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build()
+        } else {
+            audioWarning = null
+            if (index != selected || current.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) {
+                val (group, track) = candidates[index]
+                current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track)).build()
+            }
+        }
+    }
     private fun refreshEnhancement() {
         player?.let { configureEnhancement(it) }
         repaint?.cancel()
@@ -412,10 +562,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         val selected = choice ?: return
         val current = player ?: return
         listOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_TEXT).forEach { type ->
+            if (type == C.TRACK_TYPE_AUDIO && muteProblemAudio) return@forEach
             if ((type == C.TRACK_TYPE_AUDIO && audioRestored) || (type == C.TRACK_TYPE_TEXT && (textRestored || selected.textDisabled))) return@forEach
             val id = if (type == C.TRACK_TYPE_AUDIO) selected.audioId else selected.textId
             val language = if (type == C.TRACK_TYPE_AUDIO) selected.audioLanguage else selected.textLanguage
-            val candidates = value.groups.filter { it.type == type }.flatMap { group -> (0 until group.length).filter { group.isTrackSupported(it) }.map { group to it } }
+            val candidates = value.groups.filter { it.type == type }.flatMap { group -> (0 until group.length).filter { group.isTrackSupported(it, false) && (type != C.TRACK_TYPE_AUDIO || audioFormatKey(group.getTrackFormat(it)) !in failedAudioFormats) }.map { group to it } }
             val index = preferredTrackIndex(candidates.map { (group, track) -> group.getTrackFormat(track).let { it.id to it.language } }, id, language)
             if (index >= 0) {
                 if (type == C.TRACK_TYPE_AUDIO) audioRestored = true else textRestored = true
@@ -507,6 +658,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         val current = player ?: return
         if (!group.isTrackSupported(index)) return
         val format = group.getTrackFormat(index)
+        if (group.type == C.TRACK_TYPE_AUDIO) { muteProblemAudio = false; failedAudioFormats.remove(audioFormatKey(format)) }
         if (group.type == C.TRACK_TYPE_AUDIO) { audioRestored = true; rememberChoice { it.copy(audioId = format.id, audioLanguage = format.language) } }
         if (group.type == C.TRACK_TYPE_TEXT) { textRestored = true; rememberChoice { it.copy(textId = format.id, textLanguage = format.language, textDisabled = false) } }
         if (group.type == C.TRACK_TYPE_TEXT) savedState["selectExternal"] = false
@@ -563,7 +715,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         subtitleWork = viewModelScope.launch {
             delay(120)
             try {
-                val cached = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), offset, preparedSubtitle) }
+                val cached = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), offset, preparedSubtitle, subtitleEncoding) }
                 if (video != currentUri) return@launch
                 preparedSubtitle = cached; preparedSource = source; preparedDelay = offset
                 val current = player ?: return@launch
@@ -603,8 +755,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         val current = player ?: return false
         if (!current.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) || !current.isCurrentMediaItemSeekable) return false
         val duration = current.duration
-        val target = (current.currentPosition + offsetMs).coerceAtLeast(0L)
-        current.seekTo(if (duration != C.TIME_UNSET) target.coerceAtMost(duration.coerceAtLeast(0L)) else target)
+        current.seekTo(seekWithOffset(current.currentPosition, offsetMs, duration))
         savePlaybackState()
         return true
     }
@@ -612,11 +763,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun seekTo(position: Long) {
         val current = player ?: return
         if (!current.isCurrentMediaItemSeekable) return
-        current.seekTo(position.coerceIn(0L, if (current.duration > 0) current.duration else Long.MAX_VALUE))
+        current.seekTo(boundedSeek(position, current.duration))
         savePlaybackState()
     }
 
-    fun stop() {
+    fun stop(keepBackgroundPlayer: Boolean = false) {
         subtitleWork?.cancel(); subtitleWork = null
         rebuilding?.cancel(); rebuilding = null
         effectsConfigured = false
@@ -633,7 +784,15 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savePlaybackState()
         val previous = player
         player = null
-        previous?.release()
+        if (keepBackgroundPlayer) pendingBackgroundReplacement = previous
+        else {
+            previous?.release()
+            pendingBackgroundReplacement?.let { pending ->
+                pendingBackgroundReplacement = null
+                BackgroundPlaybackService.detach(getApplication(), pending)
+                pending.release(); backgroundEnabled = false
+            }
+        }
         isPlaying = false
         buffering = false
     }

@@ -9,8 +9,7 @@ enum class SeekSensitivity(val seconds: Int) {
 fun seekPreview(start: Long, distanceDp: Float, widthDp: Float, duration: Long,
     sensitivity: SeekSensitivity = SeekSensitivity.Medium): Long {
     val fraction = if (distanceDp.isFinite() && widthDp.isFinite() && widthDp > 0f) (distanceDp / widthDp).coerceIn(-1f, 1f) else 0f
-    return (start + (fraction * sensitivity.seconds * 1000).toLong())
-        .coerceIn(0L, if (duration > 0L) duration else Long.MAX_VALUE)
+    return seekWithOffset(start, (fraction * sensitivity.seconds * 1000).toLong(), duration)
 }
 
 /** A diagonal movement stays undecided until one axis clearly dominates. */

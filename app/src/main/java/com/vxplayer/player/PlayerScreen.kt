@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,6 +71,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     val inPip = host?.pipMode == true
     val context = LocalContext.current
     var playerView by remember { mutableStateOf<GesturePlayerView?>(null) }
+    var report by remember { mutableStateOf<String?>(null) }
+    report?.let { PlaybackProblemDialog(it) { report = null } }
     val defaults by AppSettings.get(context).state.collectAsStateWithLifecycle()
     val window = activity?.window
     val orientation = rememberOrientationController()
@@ -142,9 +145,14 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         }
     }
     DisposableEffect(host, model) {
+        host?.playerCallbackOwner = model
         host?.canEnterPip = { model.player?.let { it.playWhenReady && it.playbackState != androidx.media3.common.Player.STATE_ENDED } == true && !model.failed && !model.choosingSubtitle && !model.backgroundEnabled }
         host?.releaseHiddenPlayer = { model.onHidden() }
-        onDispose { host?.canEnterPip = { false }; host?.releaseHiddenPlayer = {}; host?.updatePip() }
+        onDispose {
+            if (host?.playerCallbackOwner === model) {
+                host.playerCallbackOwner = null; host.canEnterPip = { false }; host.releaseHiddenPlayer = {}; host.updatePip()
+            }
+        }
     }
     LaunchedEffect(host, model.isPlaying, model.choosingSubtitle, model.backgroundEnabled) { host?.updatePip() }
     LaunchedEffect(inPip) { model.setPipActive(inPip) }
@@ -212,7 +220,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             view.resizeMode = when (aspect) { 1, 3 -> AspectRatioFrameLayout.RESIZE_MODE_FILL; 2 -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM; else -> AspectRatioFrameLayout.RESIZE_MODE_FIT }
             val frame = view.findViewById<AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
             val size = model.videoSize
-            val width = if (aspect == 3 && size.width > 0 && !inPip) size.width else -1
+            val width = if (aspect == 3 && size.width > 0 && !inPip) displayDimensions(size.width, size.height, 0, size.pixelWidthHeightRatio).first else -1
             val height = if (aspect == 3 && size.height > 0 && !inPip) size.height else -1
             if (frame.layoutParams.width != width || frame.layoutParams.height != height) frame.layoutParams = FrameLayout.LayoutParams(width, height, Gravity.CENTER)
             frame.scaleX = if (inPip) 1f else zoom; frame.scaleY = if (inPip) 1f else zoom
@@ -237,9 +245,11 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             }
             view.onHorizontalStart = { swiping = true; seekStart = model.player?.currentPosition ?: 0L }
             view.onHorizontal = { distanceDp, widthDp ->
-                val target = seekPreview(seekStart, distanceDp, widthDp, duration, defaults.seekSensitivity); seekTarget = target
-                val delta = (target - seekStart) / 1000
-                feedback("${formatDuration(target)} (${if (delta >= 0) "+" else ""}$delta s)")
+                if (model.player?.isCurrentMediaItemSeekable == true) {
+                    val target = seekPreview(seekStart, distanceDp, widthDp, duration, defaults.seekSensitivity); seekTarget = target
+                    val delta = (target - seekStart) / 1000
+                    feedback("${formatDuration(target)} (${if (delta >= 0) "+" else ""}$delta s)")
+                } else feedback("Seeking is not available for this stream")
             }
             view.onGestureEnd = { cancelled -> if (!cancelled) seekTarget?.let { model.seekTo(it) }; seekTarget = null; swiping = false; touch() }
             view.onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 4f); feedback("Zoom ${(zoom * 100).roundToInt()}%") }
@@ -260,7 +270,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 if (Build.VERSION.SDK_INT >= 26 && host != null && !model.isPrivatePlayback) VXIconButton(Icons.Default.PictureInPictureAlt, "Picture in picture", { host.enterPlayerPip(true) }, enabled = !model.backgroundEnabled && model.player != null)
                 VXIconButton(Icons.Default.MoreVert, "Playback options", { menu = true; touch() })
             }
-            if (model.videoEnhancer.enabled) Text("Smart Enhance: ${model.videoEnhancer.lastMode}${if (model.videoEnhancer.comparing) " · Original preview" else ""}",
+            if (model.videoEnhancer.enabled) Text("Smart Enhance: ${if (model.enhancementUnavailable) "Unavailable for this video" else model.videoEnhancer.lastMode}${if (model.videoEnhancer.comparing) " · Original preview" else ""}",
                 color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(start = 24.dp, bottom = 8.dp).background(Color.Black.copy(alpha = .6f), RoundedCornerShape(12.dp)).padding(6.dp))
         }
@@ -282,11 +292,11 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 val sliderColors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = .3f))
                 Slider(value = slider ?: position.toFloat().coerceAtMost(duration.toFloat()), onValueChange = { slider = it; touch() },
                     onValueChangeFinished = { slider?.let { model.seekTo(it.toLong()) }; slider = null; touch() },
-                    valueRange = 0f..duration.coerceAtLeast(1L).toFloat(), enabled = duration > 0, colors = sliderColors, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    valueRange = 0f..duration.coerceAtLeast(1L).toFloat(), enabled = duration > 0 && model.player?.isCurrentMediaItemSeekable == true, colors = sliderColors, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     thumb = { Box(Modifier.size(12.dp, 24.dp).background(Color.White, RoundedCornerShape(6.dp))) },
                     track = { state -> SliderDefaults.Track(sliderState = state, colors = sliderColors, modifier = Modifier.height(8.dp)) })
                 TextButton(onClick = { remaining = !remaining; touch() }) {
-                    Text(if (remaining) "−${formatDuration(duration - position)}" else formatDuration(duration), color = Color.White,
+                    Text(if (duration <= 0) "--:--" else if (remaining) "−${formatDuration(duration - position)}" else formatDuration(duration), color = Color.White,
                         style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), maxLines = 1)
                 }
             }
@@ -317,10 +327,17 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             CircularProgressIndicator(color = Color.White)
             Text("Buffering…", color = Color.White, modifier = Modifier.padding(top = 8.dp))
         }
-        if (model.failed) Column(Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .85f)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        if (model.failed) Column(Modifier.align(Alignment.Center).fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()).background(Color.Black.copy(alpha = .85f)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.ErrorOutline, "Playback error", tint = Color.White, modifier = Modifier.size(40.dp))
             Text(model.failureMessage, color = Color.White)
             TextButton(onClick = { model.retryPlayback() }) { Text("Retry", color = Color.White) }
+            TextButton(onClick = { model.playWithoutEnhance() }) { Text("Play without enhance", color = Color.White) }
+            TextButton(onClick = { val text = model.problemReport(); copyProblemReport(context, text); report = text }) { Text("Copy report", color = Color.White) }
+            TextButton(onClick = onBack) { Text("Back", color = Color.White) }
         }
+        if (!inPip && !model.failed) model.audioWarning?.let { warning -> Text(warning, color = Color.White,
+            modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 80.dp, start = 16.dp, end = 16.dp)
+                .background(Color.Black.copy(alpha = .85f), RoundedCornerShape(12.dp)).padding(12.dp), style = MaterialTheme.typography.bodySmall) }
     }
     }
 }

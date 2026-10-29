@@ -64,6 +64,28 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.vxplayer.ui.brandSplashExit
 
 class MainActivity : ComponentActivity() {
+    private var externalVideoUri by mutableStateOf<String?>(null)
+    var playerCallbackOwner: Any? = null
+    private fun acceptExternalVideo(request: Intent?) {
+        if (request?.action != Intent.ACTION_VIEW) return
+        val uri = request.data ?: return
+        if (uri.scheme !in listOf("content", "file")) return
+        val privatePath = runCatching {
+            uri.scheme == "file" && java.io.File(uri.path.orEmpty()).canonicalPath.let { path ->
+                val root = applicationContext.dataDir.canonicalPath
+                path == root || path.startsWith(root + java.io.File.separator)
+            }
+        }.getOrDefault(true)
+        if (privatePath) {
+            android.widget.Toast.makeText(this, "Open Private videos from the Private screen.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (request.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        externalVideoUri = uri.toString()
+    }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptExternalVideo(intent) }
     var pipMode by mutableStateOf(false)
         private set
     var canEnterPip: () -> Boolean = { false }
@@ -102,17 +124,29 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) acceptExternalVideo(intent)
         brandSplashExit(splash, freshLaunch = savedInstanceState == null)
         enableEdgeToEdge()
         setContent {
             val settings by AppSettings.get(applicationContext).state.collectAsStateWithLifecycle()
             val navigation = rememberNavController()
+            LaunchedEffect(externalVideoUri) {
+                val source = externalVideoUri ?: return@LaunchedEffect
+                val video = withContext(Dispatchers.IO) { com.vxplayer.library.inspectLocalVideo(applicationContext, Uri.parse(source), Uri.parse(source).lastPathSegment ?: "Video") }
+                if (externalVideoUri == source) {
+                    externalVideoUri = null
+                    navigation.navigate("player?uri=${Uri.encode(source)}&title=${Uri.encode(video.title)}&folder=") {
+                        popUpTo("library")
+                        launchSingleTop = true
+                    }
+                }
+            }
             val destination by navigation.currentBackStackEntryAsState()
             VXTheme(settings, playerMode = destination?.destination?.route?.startsWith("player") == true) {
                 NavHost(navigation, startDestination = "library", enterTransition = { fadeIn(tween(180)) },
                     exitTransition = { fadeOut(tween(140)) }, popEnterTransition = { fadeIn(tween(180)) }, popExitTransition = { fadeOut(tween(140)) }) {
                     composable("library") {
-                        LibraryScreen(onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->
+                        LibraryScreen(requestOnLaunch = externalVideoUri == null, onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->
                             navigation.navigate("player?uri=${Uri.encode(video.uri.toString())}&title=${Uri.encode(video.title)}&folder=${Uri.encode(folder)}") {
                                 launchSingleTop = true
                             }

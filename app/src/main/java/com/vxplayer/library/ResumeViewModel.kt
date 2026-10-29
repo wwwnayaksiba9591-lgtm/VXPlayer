@@ -16,6 +16,9 @@ class ResumeViewModel(application: Application) : AndroidViewModel(application) 
         private set
     var busy by mutableStateOf(false)
         private set
+    private var dismissed by mutableStateOf<Pair<String, Long>?>(null)
+    val showFab get() = candidate?.let { dismissed != (it.uri to it.playedAt) } == true
+    fun dismissFab() { candidate?.let { dismissed = it.uri to it.playedAt } }
     private var refreshJob: Job? = null
     private val store = PlaybackPositionStore.get(application)
     private fun readable(uri: Uri): Boolean = try {

@@ -58,7 +58,7 @@ private fun permissions() = when {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit = {}, model: VideoLibraryViewModel = viewModel()) {
+fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit = {}, model: VideoLibraryViewModel = viewModel(), requestOnLaunch: Boolean = true) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val resumeModel: ResumeViewModel = viewModel()
@@ -88,13 +88,22 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         allowed = access(); model.refresh(allowed)
     }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            try {
+                val video = withContext(Dispatchers.IO) { inspectLocalVideo(context, uri) }
+                onVideoClick(video, "")
+            } catch (_: Exception) { snackbar.showSnackbar("Video not found") }
+        }
+    }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) { allowed = access(); model.refresh(allowed); resumeModel.refresh(state.folders.flatMap { it.videos }) } }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(Unit) {
-        if (!allowed && !requested) { requested = true; picker.launch(permissions()) }
+        if (!allowed && !requested && requestOnLaunch) { requested = true; picker.launch(permissions()) }
         else model.refresh(allowed)
     }
     BackHandler(selectedFolder != null) { selectedFolder = null; tab = 0 }
@@ -115,6 +124,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 Box {
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
+                        DropdownMenuItem(text = { Text("Open video file") }, onClick = { appMenu = false; filePicker.launch(arrayOf("*/*")) })
                         DropdownMenuItem(text = { Text("Settings") }, onClick = { appMenu = false; onSettings() })
                         DropdownMenuItem(text = { Text("Private") }, onClick = {
                             appMenu = false
@@ -208,10 +218,10 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     }
 }
 
-        if (tab != 3 && selectedFolder == null) resumeModel.candidate?.let { video ->
+        if (tab != 3 && selectedFolder == null && resumeModel.showFab) resumeModel.candidate?.let { video ->
             Box(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(20.dp)) {
                 ResumeFab(video, folderScroll.isScrollInProgress || videosScroll.isScrollInProgress || recentScroll.isScrollInProgress || gridScroll.isScrollInProgress,
-                    resumeModel.busy, ::resume)
+                    resumeModel.busy, ::resume, resumeModel::dismissFab)
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).safeDrawingPadding())
@@ -246,11 +256,11 @@ fun VideoThumbnail(video: Video, modifier: Modifier = Modifier) {
     val bitmap by produceState(thumbnails.get(cacheKey), cacheKey) {
         if (value == null) value = withContext(Dispatchers.IO) {
             try {
-                val result = if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(video.uri, Size(256, 160), null)
+                val result = runCatching { if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(video.uri, Size(256, 160), null)
                 else {
                     @Suppress("DEPRECATION")
                     MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver, ContentUris.parseId(video.uri), MediaStore.Video.Thumbnails.MINI_KIND, null)
-                }
+                } }.getOrNull() ?: fallbackVideoThumbnail(context, video.uri)
                 result?.also { thumbnails.put(cacheKey, it) }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }

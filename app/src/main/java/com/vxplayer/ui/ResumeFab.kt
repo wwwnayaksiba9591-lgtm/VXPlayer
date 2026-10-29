@@ -16,7 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun ResumeFab(video: ResumeVideo, scrolling: Boolean, busy: Boolean, resume: (Boolean) -> Unit) {
+fun ResumeFab(video: ResumeVideo, scrolling: Boolean, busy: Boolean, resume: (Boolean) -> Unit, onDismiss: () -> Unit = {}) {
     var dismissed by rememberSaveable(video.uri) { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     if (dismissed) return
@@ -41,7 +41,7 @@ fun ResumeFab(video: ResumeVideo, scrolling: Boolean, busy: Boolean, resume: (Bo
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Play from start") }, onClick = { menu = false; resume(true) })
-            DropdownMenuItem(text = { Text("Dismiss for now") }, onClick = { menu = false; dismissed = true })
+            DropdownMenuItem(text = { Text("Dismiss for now") }, onClick = { menu = false; dismissed = true; onDismiss() })
         }
     }
 }

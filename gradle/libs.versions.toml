@@ -12,6 +12,7 @@ junit = "4.13.2"
 gson = "2.11.0"
 biometric = "1.1.0"
 splashscreen = "1.0.1"
+chardet = "2.0.4"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose" }
@@ -36,6 +37,7 @@ junit = { module = "junit:junit", version.ref = "junit" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
+chardet = { module = "com.github.albfernandez:juniversalchardet", version.ref = "chardet" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

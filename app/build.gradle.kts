@@ -68,6 +68,7 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.biometric)
     implementation(libs.splashscreen)
+    implementation(libs.chardet)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
 }

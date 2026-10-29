@@ -62,5 +62,13 @@ class BackgroundPlaybackService : MediaSessionService() {
                 context.stopService(Intent(context, BackgroundPlaybackService::class.java))
             }
         }
+        /** Swap inside an already running service; never start a hidden new foreground service. */
+        fun replaceForRecovery(previous: ExoPlayer, replacement: ExoPlayer): Boolean {
+            val service = instance ?: return false
+            if (activePlayer !== previous) return false
+            activePlayer = replacement
+            return try { service.attachPlayer(); true }
+            catch (_: RuntimeException) { activePlayer = previous; false }
+        }
     }
 }

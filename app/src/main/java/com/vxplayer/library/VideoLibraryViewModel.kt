@@ -57,44 +57,5 @@ class VideoLibraryViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    private suspend fun queryVideos(): List<VideoFolder> {
-        val app = getApplication<Application>()
-        val collection = if (Build.VERSION.SDK_INT >= 29) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(
-            MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DURATION, MediaStore.Video.Media.SIZE,
-            MediaStore.Video.Media.BUCKET_ID, MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
-            MediaStore.Video.Media.WIDTH, MediaStore.Video.Media.HEIGHT, MediaStore.Video.Media.DATE_ADDED, MediaStore.Video.Media.DATA,
-        )
-        val videos = linkedMapOf<String, MutableList<Video>>()
-        val names = mutableMapOf<String, String>()
-        val cursor = app.contentResolver.query(collection, projection, null, null, "${MediaStore.Video.Media.DISPLAY_NAME} ASC")
-            ?: error("MediaStore unavailable")
-        cursor.use {
-            val id = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-            val title = it.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-            val duration = it.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
-            val size = it.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-            val bucket = it.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_ID)
-            val folder = it.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
-            while (it.moveToNext()) {
-                coroutineContext.ensureActive()
-                val key = it.getString(bucket) ?: "unknown"
-                names[key] = it.getString(folder)?.takeIf(String::isNotBlank) ?: app.getString(R.string.unknown_folder)
-                videos.getOrPut(key) { mutableListOf() }.add(Video(
-                    ContentUris.withAppendedId(collection, it.getLong(id)),
-                    it.getString(title)?.takeIf(String::isNotBlank) ?: app.getString(R.string.unknown_video),
-                    it.getLong(duration).coerceAtLeast(0), it.getLong(size).coerceAtLeast(0),
-                    width = it.getInt(it.getColumnIndexOrThrow(MediaStore.Video.Media.WIDTH)),
-                    height = it.getInt(it.getColumnIndexOrThrow(MediaStore.Video.Media.HEIGHT)),
-                    dateAdded = it.getLong(it.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)),
-                    path = it.getString(it.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)).orEmpty(), folderKey = key,
-                ))
-            }
-        }
-        return videos.map { (key, items) -> VideoFolder(key, names.getValue(key), items) }
-            .sortedBy { it.name.lowercase() }
-    }
+    private suspend fun queryVideos(): List<VideoFolder> = scanMediaLibrary(getApplication())
 }
