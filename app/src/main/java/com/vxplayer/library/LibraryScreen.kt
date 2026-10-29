@@ -61,6 +61,10 @@ private fun permissions() = when {
 fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit = {}, model: VideoLibraryViewModel = viewModel()) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val resumeModel: ResumeViewModel = viewModel()
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    fun resume(fromStart: Boolean = false) { resumeModel.play(fromStart, onVideoClick) { scope.launch { snackbar.showSnackbar("Video not found") } } }
     fun access() = permissions().any { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     var allowed by remember { mutableStateOf(access()) }
     var requested by rememberSaveable { mutableStateOf(false) }
@@ -77,13 +81,15 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     val folderScroll = rememberLazyListState()
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
+    val gridScroll = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val detailScroll = rememberSaveable(selectedFolder, saver = LazyListState.Saver) { LazyListState() }
     val state by model.state.collectAsStateWithLifecycle()
+    LaunchedEffect(state.folders, state.recentlyPlayed) { resumeModel.refresh(state.folders.flatMap { it.videos }) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         allowed = access(); model.refresh(allowed)
     }
     DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) { allowed = access(); model.refresh(allowed) } }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) { allowed = access(); model.refresh(allowed); resumeModel.refresh(state.folders.flatMap { it.videos }) } }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
@@ -97,12 +103,14 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
         sort, descending, { it.name }, { it.videos.maxOfOrNull { video -> video.dateAdded } ?: 0L },
         { it.videos.sumOf { video -> video.sizeBytes } }, { it.videos.sumOf { video -> video.durationMs } })
     Surface(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding()) {
             TopAppBar(windowInsets = WindowInsets(0, 0, 0, 0), title = {
                 Text(folder?.name ?: "VXPlayer", maxLines = 1, overflow = TextOverflow.Ellipsis)
             }, navigationIcon = {
                 if (selectedFolder != null) VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back to folders", { selectedFolder = null; tab = 0 })
             }, actions = {
+                VXIconButton(Icons.Default.History, "Last played", { resume() }, enabled = resumeModel.candidate != null && !resumeModel.busy)
                 if (tab != 3) VXIconButton(Icons.Default.Search, "Search library", { search = !search; if (!search) query = "" })
                 Box {
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
@@ -130,18 +138,6 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
             if (selectedFolder == null) TabRow(selectedTabIndex = tab) {
                 listOf("Folders", "Videos", "Recent", "Network").forEachIndexed { index, label ->
                     Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
-                }
-            }
-            if (selectedFolder == null && tab != 3 && state.recentlyPlayed.isNotEmpty() && query.isBlank()) {
-                val last = requireNotNull(resumeCandidate(state.recentlyPlayed) { it.positionMs })
-                VXCard(onClick = { onVideoClick(last, last.folderKey) }, modifier = Modifier.padding(horizontal = VXSpace.large, vertical = VXSpace.small).fillMaxWidth()) {
-                    Row(Modifier.padding(VXSpace.medium), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(VXSpace.medium)) {
-                        Icon(Icons.Default.PlayCircleFilled, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Resume last video", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                            Text(last.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
                 }
             }
             Crossfade(targetState = tab, animationSpec = tween(160), label = "library tabs", modifier = Modifier.weight(1f)) { displayedTab ->
@@ -183,7 +179,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                         val filtered = baseVideos.filter { video -> video.title.contains(query, true) || state.folders.any { it.key == video.folderKey && it.name.contains(query, true) } }
                         val videos = if (displayedTab == 2 && selectedFolder == null) filtered else orderLibrary(filtered, sort, descending, { it.title }, { it.dateAdded }, { it.sizeBytes }, { it.durationMs })
                         if (videos.isEmpty()) LibraryMessage("No videos here yet", "Try another folder, allow more videos, or change the search.", { query = ""; model.refresh(access()) })
-                        else if (grid) LazyVerticalGrid(columns = GridCells.Adaptive(180.dp), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        else if (grid) LazyVerticalGrid(state = gridScroll, columns = GridCells.Adaptive(180.dp), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             gridItems(videos, key = { it.uri.toString() }) { video ->
                                 VXCard(onClick = { onVideoClick(video, video.folderKey) }) {
                                     VideoThumbnail(video, Modifier.fillMaxWidth())
@@ -212,6 +208,14 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     }
 }
 
+        if (tab != 3 && selectedFolder == null) resumeModel.candidate?.let { video ->
+            Box(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(20.dp)) {
+                ResumeFab(video, folderScroll.isScrollInProgress || videosScroll.isScrollInProgress || recentScroll.isScrollInProgress || gridScroll.isScrollInProgress,
+                    resumeModel.busy, ::resume)
+            }
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).safeDrawingPadding())
+        }
 }
 
 }
