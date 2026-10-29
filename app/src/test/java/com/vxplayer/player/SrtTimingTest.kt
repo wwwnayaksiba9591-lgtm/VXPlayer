@@ -16,4 +16,16 @@ class SrtTimingTest {
     }
     @Test(expected = IllegalArgumentException::class) fun rejectsMalformedSubtitles() { SrtTiming.shift("not an SRT", 100) }
     @Test(expected = IllegalArgumentException::class) fun rejectsExcessiveOffsets() { SrtTiming.shift("", 60_100) }
+    @Test fun rejectsMalformedTimingAndReversedRanges() {
+        listOf("00:61:01,000 --> 00:62:02,000", "00:00:02,000 --> 00:00:01,000",
+            "00:00:01,00 --> 00:00:02,000").forEach { timing ->
+            assertThrows(IllegalArgumentException::class.java) { SrtTiming.shift("1\n$timing\nCaption", -100) }
+        }
+    }
+    @Test fun oneSecondStepsShiftBothEndsAndClampAtZero() {
+        assertTrue(SrtTiming.shift("1\n00:00:00,500 --> 00:00:02,000\nCaption", -1000)
+            .contains("00:00:00,000 --> 00:00:01,000"))
+        assertTrue(SrtTiming.shift("1\n00:00:00,500 --> 00:00:02,000\nCaption", 1000)
+            .contains("00:00:01,500 --> 00:00:03,000"))
+    }
 }

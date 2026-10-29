@@ -51,6 +51,12 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         private set
     var hasExternalSrt by mutableStateOf(false)
         private set
+    val canDelayExternalSubtitle: Boolean
+        get() = hasExternalSrt && !tracks.groups.any { group ->
+            group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { index ->
+                group.isTrackSelected(index) && group.getTrackFormat(index).id?.contains("external-srt") != true
+            }
+        }
     private var preparedSubtitle: Uri? = null
     private var preparedSource: String? = null
     private var preparedDelay = 0
@@ -501,7 +507,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun changeSubtitleDelay(delta: Int, reset: Boolean = false) {
-        if (!hasExternalSrt) { notice = "Delay applies only to an external SRT file."; return }
+        if (!canDelayExternalSubtitle) { notice = "Delay applies only to an external SRT file."; return }
         subtitleDelayMs = if (reset) 0 else (subtitleDelayMs + delta).coerceIn(-60_000, 60_000)
         currentUri?.let { preferences.edit().putInt(subtitleDelayKey(it), subtitleDelayMs).apply() }
         reloadExternalSubtitle(select = false)

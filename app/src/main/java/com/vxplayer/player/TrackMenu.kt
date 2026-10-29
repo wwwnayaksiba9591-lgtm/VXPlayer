@@ -77,11 +77,18 @@ fun TrackMenu(model: PlayerViewModel) {
             DropdownMenuItem(text = { Text(stringResource(R.string.load_subtitle)) },
                 onClick = { expanded = false; model.choosingSubtitle = true; picker.launch(arrayOf("*/*")) })
             HorizontalDivider()
-            Text("External SRT delay: ${model.subtitleDelayMs} ms", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+            Text("Subtitle delay", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+            if (model.canDelayExternalSubtitle) {
+            Text("${if (model.subtitleDelayMs >= 0) "+" else ""}${model.subtitleDelayMs} ms", modifier = Modifier.padding(horizontal = 16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                TextButton(onClick = { model.changeSubtitleDelay(-100) }, enabled = model.hasExternalSrt) { Text("−100 ms") }
-                TextButton(onClick = { model.changeSubtitleDelay(0, reset = true) }, enabled = model.hasExternalSrt) { Text("Reset") }
-                TextButton(onClick = { model.changeSubtitleDelay(100) }, enabled = model.hasExternalSrt) { Text("+100 ms") }
+                TextButton(onClick = { model.changeSubtitleDelay(-100) }) { Text("−100 ms") }
+                TextButton(onClick = { model.changeSubtitleDelay(0, reset = true) }) { Text("Reset") }
+                TextButton(onClick = { model.changeSubtitleDelay(100) }) { Text("+100 ms") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                TextButton(onClick = { model.changeSubtitleDelay(-1000) }) { Text("−1 s") }
+                TextButton(onClick = { model.changeSubtitleDelay(1000) }) { Text("+1 s") }
+            }
             }
             Text("External SRT only. Positive delay shows captions later. Embedded subtitles cannot be shifted.", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
         }
