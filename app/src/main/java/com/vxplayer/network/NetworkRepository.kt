@@ -51,6 +51,8 @@ class NetworkRepository(context: Context) {
             selected = updated.first { it.url == url }
             dao.clear(); dao.saveAll(updated)
         }
+        // Web history belongs to the same local list, but grants no native media session or subtitle access.
+        if (selected.streamType == "Web") return@withContext selected
         check(prefs.edit().putString("streamType:$url", selected.streamType).commit()) { "Could not save stream access." }
         val positions = PlaybackPositionStore.get(app)
         val choice = positions.loadChoice(url) ?: TrackPreference(url)

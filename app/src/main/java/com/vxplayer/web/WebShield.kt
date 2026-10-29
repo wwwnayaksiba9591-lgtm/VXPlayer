@@ -18,7 +18,8 @@ object WebShield {
         "ad-maven.com", "ad-maven.net", "a-ads.com", "bidvertiser.com", "servedbyadbutler.com",
         "pubmatic.com", "rubiconproject.com", "openx.net", "casalemedia.com", "smartadserver.com",
         "scorecardresearch.com", "quantserve.com", "hotjar.com", "hotjar.io", "clarity.ms",
-        "connect.facebook.net", "ads.twitter.com", "ads.tiktok.com", "pushwelcome.com", "pushwoosh.com"
+        "connect.facebook.net", "ads.twitter.com", "ads.tiktok.com", "pushwelcome.com", "pushwoosh.com",
+        "mc.yandex.ru", "mc.yandex.com", "imasdk.googleapis.com"
     )
     private val adPath = Regex("/(?:ads?|advertisements?|popunder|popads|vast|vpaid)(?:[/.?_-]|$)", RegexOption.IGNORE_CASE)
     fun host(url: String): String? = runCatching {
@@ -28,6 +29,8 @@ object WebShield {
     fun blocked(url: String): Boolean {
         val host = host(url) ?: return true
         if (hosts.any { host == it || host.endsWith(".$it") }) return true
+        // Observed first-party popup loader. Do not block jQuery, JW Player, caption or CDN media paths.
+        if (runCatching { URI(url).path }.getOrNull() == "/assets/jquery/ev-static.js" && WebPageRoutes.knownPage("https://$host/file/probe")) return true
         return adPath.containsMatchIn(runCatching { URI(url).rawPath.orEmpty() }.getOrDefault(""))
     }
     fun allowNavigation(current: String, target: String, gesture: Boolean, shield: Boolean): Boolean =

@@ -28,6 +28,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vxplayer.library.StreamUrls
 import com.vxplayer.library.formatDuration
 import com.vxplayer.ui.VXIconButton
+import com.vxplayer.web.WebPageRoutes
+import com.vxplayer.web.WebPlayerActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -64,7 +66,12 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
         if (busy) return
         busy = true; error = null
         scope.launch {
-            try { onPlay(model.repository.played(link, replaceAttachment)) }
+            try {
+                if (WebPageRoutes.useWeb(link.url, link.streamType)) {
+                    val selected = model.repository.played(link.copy(streamType = "Web", subtitleUri = null, subtitleName = null), true)
+                    WebPlayerActivity.open(context, selected.url)
+                } else onPlay(model.repository.played(link, replaceAttachment))
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message ?: "Could not open this link. Try again." }
             finally { busy = false }
@@ -93,7 +100,9 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                     }
                     OutlinedTextField(url, onValueChange = { url = it; error = null }, label = { Text("HTTP / HTTPS video URL") },
                         modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy, isError = validation != null,
-                        supportingText = { Text(validation ?: "Play direct media, or use Open web player for a video page.") })
+                        supportingText = { Text(validation ?: if (WebPageRoutes.useWeb(url, type))
+                            "Video page detected. Play opens the web player with Shield ON." else
+                            "Play direct media, or choose Web page for a website video.") })
                     Row {
                         TextButton(enabled = !busy, onClick = { url = runCatching { clipboardText() }.getOrNull().orEmpty(); error = null }) {
                             Icon(Icons.Default.ContentPaste, null); Spacer(Modifier.width(6.dp)); Text("Paste")
@@ -104,24 +113,25 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                         SuggestionChip(onClick = { url = copied; copiedLink = null; error = null }, label = { Text("Paste copied link") }, enabled = !busy)
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Auto" to "Direct video · MP4, MKV, WEBM", "HLS" to "HLS · .m3u8", "DASH" to "DASH · .mpd").forEach { (value, label) ->
+                        listOf("Auto" to "Auto · MP4, MKV, WEBM", "HLS" to "HLS · .m3u8", "DASH" to "DASH · .mpd", "Web" to "Web page").forEach { (value, label) ->
                             FilterChip(selected = type == value, onClick = { type = value }, enabled = !busy, label = { Text(label) })
                         }
                     }
                     OutlinedTextField(name, onValueChange = { name = it.take(120) }, modifier = Modifier.fillMaxWidth(),
                         enabled = !busy, singleLine = true, label = { Text("Display name (optional)") })
-                    TextButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !busy) {
+                    TextButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !busy && !WebPageRoutes.useWeb(url, type)) {
                         Icon(Icons.Default.Subtitles, null); Spacer(Modifier.width(6.dp)); Text(subtitleName ?: "Attach SRT (optional)")
                     }
                     if (subtitle != null) TextButton(onClick = { subtitle = null; subtitleName = null; attachmentChanged = true }) { Text("Remove SRT") }
                     Text("HTTP is unencrypted. Links and access tokens are stored locally.", style = MaterialTheme.typography.bodySmall)
+                    if (WebPageRoutes.useWeb(url, type)) Text("Tap the video's play icon after the page opens. Web pages use their own controls and subtitles.", style = MaterialTheme.typography.bodySmall)
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     Button(onClick = { play(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = type,
                         subtitleUri = subtitle, subtitleName = subtitleName), attachmentChanged) },
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.PlayArrow, null); Text(if (busy) "Opening…" else "Play")
+                        Icon(Icons.Default.PlayArrow, null); Text(if (busy) "Opening…" else if (WebPageRoutes.useWeb(url, type)) "Play in web player" else "Play")
                     }
-                    OutlinedButton(onClick = { com.vxplayer.web.WebPlayerActivity.open(context, url) },
+                    OutlinedButton(onClick = { play(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = "Web")) },
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.Language, null); Spacer(Modifier.width(8.dp)); Text("Open web player · Shield ON")
                     }
@@ -180,7 +190,8 @@ private fun NetworkLinkCard(link: NetworkLink, position: Long?, busy: Boolean, p
                 VXIconButton(Icons.Default.DeleteOutline, removeLabel, remove, !busy)
             }
             Text(link.url, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (position != null && position > 0) Text("Resume · ${formatDuration(position)}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+            if (link.streamType == "Web") Text("Web player · tap the page's play button", style = MaterialTheme.typography.labelMedium)
+            else if (position != null && position > 0) Text("Resume · ${formatDuration(position)}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             link.subtitleName?.let { Text("SRT · $it", style = MaterialTheme.typography.labelSmall) }
         }
     }

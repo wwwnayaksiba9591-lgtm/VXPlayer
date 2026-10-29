@@ -78,6 +78,7 @@ class WebPlayerActivity : ComponentActivity() {
             browser.setBackgroundColor(Color.BLACK)
             browser.settings.apply {
                 javaScriptEnabled = true; domStorageEnabled = true
+                useWideViewPort = true; loadWithOverviewMode = true
                 allowFileAccess = false; allowContentAccess = false
                 @Suppress("DEPRECATION")
                 allowFileAccessFromFileURLs = false
@@ -115,6 +116,7 @@ class WebPlayerActivity : ComponentActivity() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { page = url; error.visibility = View.GONE; updateStatus() }
                 override fun onPageFinished(view: WebView, url: String) {
                     if (shield) view.evaluateJavascript(WebShield.cosmeticScript, null)
+                    if (WebPageRoutes.isEmbed(url)) view.evaluateJavascript(WebPageRoutes.playerLayoutScript, null)
                     updateStatus()
                 }
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, failure: WebResourceError) {
