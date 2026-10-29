@@ -8,9 +8,19 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.vxplayer.library.StreamPageProbe
 import com.vxplayer.library.StreamUrls
 import java.io.IOException
+
+@androidx.annotation.OptIn(UnstableApi::class)
+class DirectMediaLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
+    override fun getRetryDelayMsFor(info: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
+        if (generateSequence<Throwable>(info.exception) { it.cause }.take(20).any {
+            it is HttpDataSource.InvalidContentTypeException && StreamPageProbe.isHtml(it.contentType)
+        }) C.TIME_UNSET else super.getRetryDelayMsFor(info)
+}
 
 /** The only HTTP entry point. Local playback has no network capability. */
 @androidx.annotation.OptIn(UnstableApi::class)

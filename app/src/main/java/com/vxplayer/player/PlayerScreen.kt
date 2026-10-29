@@ -313,6 +313,10 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         }
         if (locked && unlockVisible && !inPip) TextButton(onClick = { locked = false; controls = true; unlockVisible = false; touch() }, modifier = Modifier.align(Alignment.CenterEnd).safeDrawingPadding().background(Color.Black.copy(alpha = .8f))) { Text("Unlock", color = Color.White) }
         if (!inPip) indicator?.let { Text(it, color = if (it.startsWith("Volume") && model.audioEnhancer.percent > 100) Color(0xFFFFC857) else Color.White, modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(12.dp)).padding(16.dp)) }
+        if (model.buffering && !model.failed) Column(Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .7f), RoundedCornerShape(16.dp)).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = Color.White)
+            Text("Buffering…", color = Color.White, modifier = Modifier.padding(top = 8.dp))
+        }
         if (model.failed) Column(Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .85f)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(model.failureMessage, color = Color.White)
             TextButton(onClick = { model.retryPlayback() }) { Text("Retry", color = Color.White) }

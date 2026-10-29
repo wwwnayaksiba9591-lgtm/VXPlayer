@@ -74,12 +74,6 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     var descending by remember { mutableStateOf(preferences.getBoolean("descending", false)) }
     var sortOpen by remember { mutableStateOf(false) }
     var appMenu by remember { mutableStateOf(false) }
-    var openUrl by rememberSaveable { mutableStateOf(false) }
-    if (openUrl) OpenUrlSheet(onDismiss = { openUrl = false }, onPlay = { url, title, type ->
-        openUrl = false
-        preferences.edit().putString("streamType:$url", type).apply()
-        onVideoClick(Video(Uri.parse(url), title, 0L, 0L), "")
-    })
     val folderScroll = rememberLazyListState()
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
@@ -109,7 +103,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
             }, navigationIcon = {
                 if (selectedFolder != null) VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back to folders", { selectedFolder = null; tab = 0 })
             }, actions = {
-                VXIconButton(Icons.Default.Search, "Search library", { search = !search; if (!search) query = "" })
+                if (tab != 3) VXIconButton(Icons.Default.Search, "Search library", { search = !search; if (!search) query = "" })
                 Box {
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
@@ -118,13 +112,12 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                             appMenu = false
                             context.startActivity(Intent(context, com.vxplayer.privatefiles.PrivateActivity::class.java))
                         })
-                        DropdownMenuItem(text = { Text("Open URL") }, onClick = { appMenu = false; openUrl = true })
                         DropdownMenuItem(text = { Text("Rescan library") }, onClick = { appMenu = false; model.refresh(access()) })
                     }
                 }
             })
-            if (search) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            if (search && tab != 3) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
+            if (tab != 3) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Box {
                     TextButton(onClick = { sortOpen = true }) { Text("Sort: $sort") }
                     DropdownMenu(sortOpen, onDismissRequest = { sortOpen = false }) {
@@ -135,11 +128,11 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 TextButton(onClick = { grid = !grid; preferences.edit().putBoolean("grid", grid).apply() }) { Text(if (grid) "List" else "Grid") }
             }
             if (selectedFolder == null) TabRow(selectedTabIndex = tab) {
-                listOf("Folders", "Videos", "Recent").forEachIndexed { index, label ->
+                listOf("Folders", "Videos", "Recent", "Network").forEachIndexed { index, label ->
                     Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
                 }
             }
-            if (selectedFolder == null && state.recentlyPlayed.isNotEmpty() && query.isBlank()) {
+            if (selectedFolder == null && tab != 3 && state.recentlyPlayed.isNotEmpty() && query.isBlank()) {
                 val last = requireNotNull(resumeCandidate(state.recentlyPlayed) { it.positionMs })
                 VXCard(onClick = { onVideoClick(last, last.folderKey) }, modifier = Modifier.padding(horizontal = VXSpace.large, vertical = VXSpace.small).fillMaxWidth()) {
                     Row(Modifier.padding(VXSpace.medium), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(VXSpace.medium)) {
@@ -152,8 +145,11 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 }
             }
             Crossfade(targetState = tab, animationSpec = tween(160), label = "library tabs", modifier = Modifier.weight(1f)) { displayedTab ->
-            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { model.refresh(access()) }, modifier = Modifier.fillMaxSize()) {
+            PullToRefreshBox(isRefreshing = displayedTab != 3 && state.loading, onRefresh = { if (displayedTab != 3) model.refresh(access()) }, modifier = Modifier.fillMaxSize()) {
             when {
+                selectedFolder == null && displayedTab == 3 -> com.vxplayer.network.NetworkTab(onPlay = { link ->
+                    onVideoClick(Video(Uri.parse(link.url), link.title, 0L, 0L), "")
+                })
                 !allowed -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
                     FolderIcon()
                     Text("Your video library", style = MaterialTheme.typography.headlineSmall)

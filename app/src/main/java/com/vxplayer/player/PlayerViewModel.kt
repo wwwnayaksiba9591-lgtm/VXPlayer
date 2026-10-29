@@ -125,6 +125,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         private set
     var failed by mutableStateOf(false)
         private set
+    var buffering by mutableStateOf(false)
+        private set
     var failureMessage by mutableStateOf("Could not play this video.")
         private set
     fun retryPlayback() {
@@ -209,7 +211,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             }
             val networkApproved = userMediaSessionAllowed(selectedUri, preferences.contains("streamType:$selectedUri"))
             player = ExoPlayer.Builder(getApplication<Application>())
-                .setMediaSourceFactory(DefaultMediaSourceFactory(directMediaFactory(getApplication(), networkApproved)))
+                .setMediaSourceFactory(DefaultMediaSourceFactory(directMediaFactory(getApplication(), networkApproved))
+                    .setLoadErrorHandlingPolicy(DirectMediaLoadErrorPolicy()))
                 .build().apply {
                 setWakeMode(C.WAKE_MODE_LOCAL)
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
@@ -251,13 +254,19 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         if (causes.any { it is HttpDataSource.InvalidContentTypeException && StreamPageProbe.isHtml(it.contentType) }) {
                             failureMessage = StreamPageProbe.HTML_MESSAGE
                             failed = true; current?.pause()
-                        } else if (effectsConfigured && current != null && error.errorCode in 7000..7999) {
+                        } else if (effectsConfigured && current != null && (error.errorCode in 4000..4999 || error.errorCode in 7000..7999 ||
+                                causes.any { it is androidx.media3.common.VideoFrameProcessingException })) {
                             videoEnhancer.unavailable("Enhancement is unsupported on this video path; playing the original.")
                             enhanceOn = false
                             effectsConfigured = false
                             rebuildEnhancementPlayer(videoEnhancer.reason)
                         } else {
-                            failureMessage = if (selectedUri.startsWith("http", true)) when (error.errorCode) {
+                            val httpError = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                            failureMessage = if (httpError != null) when (httpError.responseCode) {
+                                403 -> "Access denied (403). This link may require permission or may have expired."
+                                404 -> "Video not found (404). Check the link."
+                                else -> "The media server returned HTTP ${httpError.responseCode}. Retry or check the link."
+                            } else if (selectedUri.startsWith("http", true)) when (error.errorCode) {
                                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Could not connect. Check your connection and retry."
                                 PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The server rejected this link. It may have expired or need authentication."
                                 else -> "Cannot play this stream. Check the URL, stream type, and media format."
@@ -271,6 +280,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         if (!playing) savePlaybackState()
                     }
                     override fun onPlaybackStateChanged(state: Int) {
+                        buffering = state == Player.STATE_BUFFERING
                         if (state == Player.STATE_ENDED) {
                             savePlaybackState()
                             if (sleepAtEnd || backgroundEnabled) {
@@ -519,6 +529,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         hasExternalSrt = true
         textRestored = true
         rememberChoice { it.copy(externalUri = uri.toString(), externalName = name, textDisabled = false, textId = "external-srt", textLanguage = null) }
+        currentUri?.takeIf { it.startsWith("http", true) }?.let { video ->
+            viewModelScope.launch {
+                try { com.vxplayer.network.NetworkRepository(getApplication()).subtitle(video, uri.toString(), name) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* TrackPreference still remembers the attached subtitle. */ }
+            }
+        }
         val parameters = player?.trackSelectionParameters ?: savedState.get<Bundle>("trackParameters")?.let {
             TrackSelectionParameters.fromBundle(it)
         } ?: TrackSelectionParameters.Builder(getApplication<Application>()).build()
@@ -617,6 +634,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         player = null
         previous?.release()
         isPlaying = false
+        buffering = false
     }
 
     override fun onCleared() { close() }

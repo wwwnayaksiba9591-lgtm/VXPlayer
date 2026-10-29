@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import com.vxplayer.network.*
 
 @Entity(tableName = "playback_positions")
 data class PlaybackPosition(@PrimaryKey val uri: String, val positionMs: Long)
@@ -37,12 +38,25 @@ interface PlaybackPositionDao {
     suspend fun clear(uri: String)
 }
 
-@Database(entities = [PlaybackPosition::class, RecentlyPlayed::class, WatchedVideo::class, TrackPreference::class], version = 4, exportSchema = false)
+@Database(entities = [PlaybackPosition::class, RecentlyPlayed::class, WatchedVideo::class, TrackPreference::class, NetworkLink::class], version = 5, exportSchema = false)
 abstract class PlaybackDatabase : RoomDatabase() {
     abstract fun positions(): PlaybackPositionDao
     abstract fun recentlyPlayed(): RecentlyPlayedDao
     abstract fun watched(): WatchedVideoDao
     abstract fun trackPreferences(): TrackPreferenceDao
+    abstract fun networkLinks(): NetworkLinkDao
+    companion object {
+        @Volatile private var instance: PlaybackDatabase? = null
+        fun get(context: Context): PlaybackDatabase = instance ?: synchronized(this) {
+            instance ?: run {
+                val app = context.applicationContext
+                val prefs = app.getSharedPreferences("vxplayer", 0)
+                Room.databaseBuilder(app, PlaybackDatabase::class.java, "playback.db")
+                    .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3, PLAYBACK_MIGRATION_3_4, NetworkMigration(prefs))
+                    .addCallback(NetworkCreation(prefs)).build()
+            }.also { instance = it }
+        }
+    }
 }
 
 /** Application-owned work survives a player ViewModel being cleared on Back. */
@@ -151,8 +165,7 @@ class PlaybackPositionStore internal constructor(dao: PlaybackPositionDao, scope
 
         fun get(context: Context): PlaybackPositionStore = instance ?: synchronized(this) {
             instance ?: run {
-                val database = Room.databaseBuilder(context.applicationContext, PlaybackDatabase::class.java, "playback.db")
-                    .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3, PLAYBACK_MIGRATION_3_4).build()
+                val database = PlaybackDatabase.get(context)
                 PlaybackPositionStore(database.positions(), CoroutineScope(SupervisorJob() + Dispatchers.IO), database.recentlyPlayed(), database.watched(), database.trackPreferences(),
                     clearData = { database.withTransaction { database.positions().clearAll(); database.recentlyPlayed().clear(); database.watched().clear() } },
                     importData = { positions -> database.withTransaction { positions.forEach { database.positions().save(it) } } })
