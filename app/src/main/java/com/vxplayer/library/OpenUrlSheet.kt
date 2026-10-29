@@ -1,6 +1,8 @@
 package com.vxplayer.library
 
 import android.net.Uri
+import android.content.Intent
+import com.vxplayer.player.WebVideoActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,13 +27,17 @@ fun OpenUrlSheet(onDismiss: () -> Unit, onPlay: (String, String, String) -> Unit
         val array = JSONArray(prefs.getString("recentStreamUrls", "[]"))
         (0 until array.length().coerceAtMost(20)).map { StreamUrls.validate(array.getString(it)) }
     }.getOrDefault(emptyList())) }
-    fun play() {
+    fun play(webpage: Boolean = false) {
         val url = try { StreamUrls.validate(value) } catch (e: IllegalArgumentException) { error = e.message; return }
         val updated = StreamUrls.recent(recent, url)
         val editor = prefs.edit().putString("recentStreamUrls", JSONArray(updated).toString())
         recent.filter { it !in updated }.forEach { editor.remove("streamType:$it") }
         editor.apply(); recent = updated
-        onPlay(url, StreamUrls.title(url), type)
+        val host = Uri.parse(url).host.orEmpty()
+        if (webpage || host.equals("morencius.com", true) || host.equals("www.morencius.com", true)) {
+            context.startActivity(Intent(context, WebVideoActivity::class.java).setData(Uri.parse(url)))
+            onDismiss()
+        } else onPlay(url, StreamUrls.title(url), type)
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -46,6 +52,10 @@ fun OpenUrlSheet(onDismiss: () -> Unit, onPlay: (String, String, String) -> Unit
             item { Text("HTTP is unencrypted. Recent links are stored on this device and may include access tokens. Clear them when finished.", style = MaterialTheme.typography.bodySmall) }
             error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             item { Button(onClick = { play() }, enabled = value.isNotBlank()) { Text("Play") } }
+            item {
+                TextButton(onClick = { play(webpage = true) }, enabled = value.isNotBlank()) { Text("Watch webpage") }
+                Text("For video hosting pages such as Morencius. Opens the website player inside VXPlayer; website controls and availability apply.", style = MaterialTheme.typography.bodySmall)
+            }
             if (recent.isNotEmpty()) item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Recent URLs", style = MaterialTheme.typography.titleMedium)
