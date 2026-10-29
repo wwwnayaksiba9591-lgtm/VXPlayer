@@ -17,7 +17,7 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
     var onVerticalStart: (Boolean) -> Unit = {}
     var onVertical: (Float) -> Unit = {}
     var onHorizontalStart: () -> Unit = {}
-    var onHorizontal: (Float) -> Unit = {}
+    var onHorizontal: (Float, Float) -> Unit = { _, _ -> }
     var onGestureEnd: (cancelled: Boolean) -> Unit = {}
     var onZoom: (Float) -> Unit = {}
     var onHold: (Boolean) -> Unit = {}
@@ -35,10 +35,17 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
         override fun onScroll(start: MotionEvent?, current: MotionEvent, dx: Float, dy: Float): Boolean {
             if (start == null || locked || holding || scaling || width == 0 || height == 0) return false
             if (axis == 0) {
-                axis = if (abs(current.y - start.y) > abs(current.x - start.x)) 1 else 2
+                val density = resources.displayMetrics.density
+                axis = swipeAxis((current.x - start.x) / density, (current.y - start.y) / density)
+                if (axis == 0) return true
                 if (axis == 1) onVerticalStart(start.x < width / 2f) else onHorizontalStart()
             }
-            if (axis == 1) onVertical((start.y - current.y) / height) else onHorizontal((current.x - start.x) / width)
+            if (axis == 1) onVertical((start.y - current.y) / height) else {
+                val density = resources.displayMetrics.density
+                val distance = (current.x - start.x) / density
+                val outsideSlop = kotlin.math.sign(distance) * (abs(distance) - 16f).coerceAtLeast(0f)
+                onHorizontal(outsideSlop, width / density)
+            }
             return true
         }
     })

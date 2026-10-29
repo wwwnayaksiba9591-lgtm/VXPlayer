@@ -223,8 +223,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 }
             }
             view.onHorizontalStart = { swiping = true; seekStart = model.player?.currentPosition ?: 0L }
-            view.onHorizontal = { fraction ->
-                val target = seekPreview(seekStart, fraction, duration); seekTarget = target
+            view.onHorizontal = { distanceDp, widthDp ->
+                val target = seekPreview(seekStart, distanceDp, widthDp, duration, defaults.seekSensitivity); seekTarget = target
                 val delta = (target - seekStart) / 1000
                 feedback("${formatDuration(target)} (${if (delta >= 0) "+" else ""}$delta s)")
             }

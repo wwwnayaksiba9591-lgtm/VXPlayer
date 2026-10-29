@@ -41,6 +41,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Switch(settings.dynamicColor, onCheckedChange = { checked -> store.update { it.copy(dynamicColor = checked) } })
             }
             HorizontalDivider()
+            Text("Gestures", style = MaterialTheme.typography.titleMedium)
+            SettingChoice("Seek swipe sensitivity", settings.seekSensitivity.name,
+                com.vxplayer.player.SeekSensitivity.entries.map { it.name }) { label ->
+                store.update { it.copy(seekSensitivity = com.vxplayer.player.SeekSensitivity.valueOf(label)) }
+            }
+            Text("Full-width swipe: Low 30 s · Medium 60 s · High 120 s", style = MaterialTheme.typography.bodySmall)
             Text("Video", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Remember enhance settings", modifier = Modifier.weight(1f))

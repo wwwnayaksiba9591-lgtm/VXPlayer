@@ -21,6 +21,7 @@ object BackupCodec {
     private val integers = mapOf("defaultAspect" to 0..3, "maxBoost" to 150..200, "bassStrength" to 0..1000,
         "subtitleColor" to Int.MIN_VALUE..Int.MAX_VALUE, "subtitleBackground" to Int.MIN_VALUE..Int.MAX_VALUE)
     private val choices = mapOf("theme" to setOf("System", "Light", "Dark"),
+        "seekSensitivity" to setOf("Low", "Medium", "High"),
         "defaultOrientation" to setOf("Auto", "System", "Portrait", "Landscape"),
         "sort" to setOf("Name", "Date", "Size", "Duration"),
         "enhancePreset" to setOf("Original", "Vivid", "Cinema", "Soft", "Sharp", "Night", "Custom"))
