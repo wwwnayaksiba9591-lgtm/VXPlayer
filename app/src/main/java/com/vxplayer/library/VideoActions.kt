@@ -76,11 +76,13 @@ fun VideoActions(video: Video, onPlay: () -> Unit, onChanged: () -> Unit) {
     Column {
         VXIconButton(Icons.Default.MoreVert, "Video actions", { expanded = true })
         DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-            listOf("Play", "Info", "Share", "Rename", "Delete").forEach { action ->
+            listOf("Play", "Info", "Share", "Rename", "Move to Private", "Delete").forEach { action ->
                 DropdownMenuItem(text = { Text(action) }, onClick = {
                     expanded = false
                     when (action) {
                         "Play" -> onPlay()
+                        "Move to Private" -> context.startActivity(Intent(context, com.vxplayer.privatefiles.PrivateActivity::class.java)
+                            .setData(video.uri).putExtra("title", video.title).putExtra("size", video.sizeBytes))
                         "Share" -> try {
                             context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                                 type = "video/*"; putExtra(Intent.EXTRA_STREAM, video.uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

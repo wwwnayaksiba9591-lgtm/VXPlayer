@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.VXPlayer.Private" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>

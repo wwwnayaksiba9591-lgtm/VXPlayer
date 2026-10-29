@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -10,7 +12,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
-        android:theme="@android:style/Theme.Material.NoActionBar" android:supportsRtl="true" android:usesCleartextTraffic="true">
+        android:theme="@android:style/Theme.Material.NoActionBar" android:supportsRtl="true" android:usesCleartextTraffic="true"
+        android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules">
+        <activity android:name=".privatefiles.PrivateActivity" android:exported="false" android:theme="@style/Theme.VXPlayer.Private"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
         <activity android:name=".player.WebVideoActivity" android:exported="false"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
         <service android:name=".player.BackgroundPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback">

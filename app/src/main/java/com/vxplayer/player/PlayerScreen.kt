@@ -244,7 +244,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                 Text(model.activeTitle.ifBlank { title }, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                 TrackMenu(model)
-                if (Build.VERSION.SDK_INT >= 26) VXIconButton(Icons.Default.PictureInPictureAlt, "Picture in picture", { host?.enterPlayerPip(true) }, enabled = !model.backgroundEnabled && model.player != null)
+                if (Build.VERSION.SDK_INT >= 26 && host != null && !model.isPrivatePlayback) VXIconButton(Icons.Default.PictureInPictureAlt, "Picture in picture", { host.enterPlayerPip(true) }, enabled = !model.backgroundEnabled && model.player != null)
                 VXIconButton(Icons.Default.MoreVert, "Playback options", { menu = true; touch() })
             }
             if (model.enhanceOn) Text("Enhance on", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 24.dp, bottom = 8.dp))

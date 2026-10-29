@@ -114,6 +114,10 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
                         DropdownMenuItem(text = { Text("Settings") }, onClick = { appMenu = false; onSettings() })
+                        DropdownMenuItem(text = { Text("Private") }, onClick = {
+                            appMenu = false
+                            context.startActivity(Intent(context, com.vxplayer.privatefiles.PrivateActivity::class.java))
+                        })
                         DropdownMenuItem(text = { Text("Open URL") }, onClick = { appMenu = false; openUrl = true })
                         DropdownMenuItem(text = { Text("Rescan library") }, onClick = { appMenu = false; model.refresh(access()) })
                     }

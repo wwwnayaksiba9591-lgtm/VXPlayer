@@ -52,11 +52,12 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     else DropdownMenuItem(text = { Text(model.videoEnhancer.reason.orEmpty()) }, onClick = {}, enabled = false)
     DropdownMenuItem(text = { Text(if (orientationLocked) "Unlock orientation" else "Lock orientation") }, onClick = onOrientation)
     DropdownMenuItem(text = { Text("Sleep timer: ${model.sleepLabel}") }, onClick = { dialog = "sleep" })
-    DropdownMenuItem(text = { Text(if (model.backgroundEnabled) "Stop background/audio-only play" else "Background/audio-only play") }, onClick = {
+    if (!model.isPrivatePlayback) DropdownMenuItem(text = { Text(if (model.backgroundEnabled) "Stop background/audio-only play" else "Background/audio-only play") }, onClick = {
         if (model.backgroundEnabled) model.setBackground(false)
         else if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         else if (!model.setBackground(true)) message = "Background playback could not start."
     })
+    if (model.isPrivatePlayback) Text("Private playback pauses when hidden; PiP and background audio are unavailable here.", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
     DropdownMenuItem(text = { Text("Set A${model.aMs?.let { " (${formatDuration(it)})" }.orEmpty()}") }, onClick = { model.setA() })
     DropdownMenuItem(text = { Text("Set B${model.bMs?.let { " (${formatDuration(it)})" }.orEmpty()}") }, onClick = { if (!model.setB()) message = "Set A first, then set B at least half a second later." })
     DropdownMenuItem(text = { Text("Clear A–B repeat") }, onClick = { model.clearRepeat() })

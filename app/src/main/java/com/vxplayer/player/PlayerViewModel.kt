@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import com.vxplayer.settings.AppSettings
+import com.vxplayer.privatefiles.PrivateRepository
+import com.vxplayer.privatefiles.PrivateAccess
 import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
@@ -134,6 +136,9 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private var starting: Job? = null
     private var checkpoint: Job? = null
     private var currentUri: String? = null
+    private var privateId: String? = null
+    val isPrivatePlayback: Boolean get() = privateId != null
+    private val privatePositions = application.getSharedPreferences("private-playback", 0)
 
     // Only lightweight playback state survives rotation; the decoder and surface are released.
     fun start(uri: Uri, title: String, folder: String = savedState.get<String>("folder").orEmpty()) {
@@ -147,6 +152,10 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["activeUri"] = selectedUri
         savedState["activeTitle"] = activeTitle
         currentUri = selectedUri
+        privateId = PrivateRepository.privateId(getApplication(), Uri.parse(selectedUri))
+        if (isPrivatePlayback && !PrivateAccess.unlocked) {
+            failed = true; failureMessage = "Unlock Private to play this video."; return
+        }
         subtitleDelayMs = preferences.getInt(subtitleDelayKey(selectedUri), 0).coerceIn(-60_000, 60_000)
         audioEnhancer.newVideo(selectedUri)
         videoEnhancer.newVideo(selectedUri)
@@ -158,7 +167,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 if (playlist.none { it.uri == selectedUri }) playlist = listOf(PlaylistVideo(selectedUri, activeTitle))
             }
             val position = savedState.get<Long>("position") ?: try {
-                positions.load(selectedUri) ?: 0L
+                privateId?.let { privatePositions.getLong(it, 0L) } ?: positions.load(selectedUri) ?: 0L
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -244,7 +253,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@PlayerViewModel.isPlaying = playing
-                        if (playing) currentUri?.let { positions.recordPlayed(it, activeTitle) }
+                        if (playing && !isPrivatePlayback) currentUri?.let { positions.recordPlayed(it, activeTitle) }
                         if (!playing) savePlaybackState()
                     }
                     override fun onPlaybackStateChanged(state: Int) {
@@ -416,6 +425,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun close() { setBackground(false); stop() }
 
     fun setBackground(enabled: Boolean): Boolean {
+        if (enabled && isPrivatePlayback) { notice = "Private playback pauses when hidden."; return false }
         val current = player ?: return false
         if (enabled) {
             current.play()
@@ -541,8 +551,12 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             val position = if (it.playbackState == Player.STATE_ENDED) 0L else it.currentPosition.coerceAtLeast(0L)
             savedState["position"] = position
             savedState["playWhenReady"] = it.playWhenReady && it.playbackState != Player.STATE_ENDED
-            currentUri?.let { uri -> positions.save(uri, position) }
-            if (it.playbackState == Player.STATE_ENDED) currentUri?.let { uri -> positions.finished(uri) }
+            val id = privateId
+            if (id != null) privatePositions.edit().putLong(id, position).apply()
+            else {
+                currentUri?.let { uri -> positions.save(uri, position) }
+                if (it.playbackState == Player.STATE_ENDED) currentUri?.let { uri -> positions.finished(uri) }
+            }
         }
     }
 
