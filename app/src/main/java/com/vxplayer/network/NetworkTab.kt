@@ -93,7 +93,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                     }
                     OutlinedTextField(url, onValueChange = { url = it; error = null }, label = { Text("HTTP / HTTPS video URL") },
                         modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy, isError = validation != null,
-                        supportingText = { Text(validation ?: "Direct media links only. Web pages are not supported.") })
+                        supportingText = { Text(validation ?: "Play direct media, or use Open web player for a video page.") })
                     Row {
                         TextButton(enabled = !busy, onClick = { url = runCatching { clipboardText() }.getOrNull().orEmpty(); error = null }) {
                             Icon(Icons.Default.ContentPaste, null); Spacer(Modifier.width(6.dp)); Text("Paste")
@@ -121,6 +121,11 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.PlayArrow, null); Text(if (busy) "Opening…" else "Play")
                     }
+                    OutlinedButton(onClick = { com.vxplayer.web.WebPlayerActivity.open(context, url) },
+                        enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Language, null); Spacer(Modifier.width(8.dp)); Text("Open web player · Shield ON")
+                    }
+                    Text("Web Shield blocks known ad/tracker requests and popups. Some websites may not work with blocking enabled.", style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = { edit(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = type,
                         subtitleUri = subtitle, subtitleName = subtitleName)) }, enabled = !busy && url.isNotBlank() && validation == null) {
                         Icon(Icons.Outlined.StarBorder, null); Spacer(Modifier.width(6.dp)); Text("Save favourite")

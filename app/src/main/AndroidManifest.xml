@@ -17,6 +17,8 @@
         android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules">
         <activity android:name=".privatefiles.PrivateActivity" android:exported="false" android:theme="@style/Theme.VXPlayer.Private"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
+        <activity android:name=".web.WebPlayerActivity" android:exported="false"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
         <service android:name=".player.BackgroundPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback">
             <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
         </service>

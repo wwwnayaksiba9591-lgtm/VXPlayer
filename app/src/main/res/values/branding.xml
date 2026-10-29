@@ -1,7 +1,7 @@
 <resources>
     <string name="made_in_india_splash">Made in India with love by Siba</string>
     <string name="privacy_line">No ads. No tracking. No data leaves your device.</string>
-    <string name="streaming_privacy_detail">No automatic uploads. Streaming and exports contact only the media servers or document providers you choose.</string>
+    <string name="streaming_privacy_detail">VXPlayer sends no analytics. Streams, web pages and exports contact the services you open. Web Shield reduces third-party requests but cannot block all website tracking.</string>
     <color name="vx_splash_background">#F8FAFD</color>
     <style name="Theme.VXPlayer" parent="android:style/Theme.Material.NoActionBar" />
     <style name="Theme.VXPlayer.Starting" parent="Theme.SplashScreen">

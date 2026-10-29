@@ -333,6 +333,12 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             TextButton(onClick = { model.retryPlayback() }) { Text("Retry", color = Color.White) }
             TextButton(onClick = { model.playWithoutEnhance() }) { Text("Play without enhance", color = Color.White) }
             TextButton(onClick = { val text = model.problemReport(); copyProblemReport(context, text); report = text }) { Text("Copy report", color = Color.White) }
+            if (model.failureMessage.contains(com.vxplayer.library.StreamPageProbe.HTML_MESSAGE) &&
+                com.vxplayer.web.WebShield.host(uri.toString()) != null) {
+                TextButton(onClick = { model.player?.pause(); com.vxplayer.web.WebPlayerActivity.open(context, uri.toString()) }) {
+                    Text("Open web player · Shield ON", color = Color.White)
+                }
+            }
             TextButton(onClick = onBack) { Text("Back", color = Color.White) }
         }
         if (!inPip && !model.failed) model.audioWarning?.let { warning -> Text(warning, color = Color.White,
