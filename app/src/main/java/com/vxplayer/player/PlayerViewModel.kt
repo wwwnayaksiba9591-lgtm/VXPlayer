@@ -92,6 +92,23 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     var playlist by mutableStateOf<List<PlaylistVideo>>(emptyList())
         private set
     private var advance: Job? = null
+    var playbackMode by mutableStateOf(AppSettings.get(application).state.value.playbackMode)
+        private set
+    private var playlistCursor by mutableStateOf(PlaylistCursor(
+        savedState.get<ArrayList<String>>("shuffleHistory").orEmpty(), savedState.get<Int>("shuffleIndex") ?: 0,
+        savedState.get<ArrayList<String>>("shuffleRemaining").orEmpty()))
+    fun cyclePlaybackMode() {
+        playbackMode = playbackMode.next()
+        AppSettings.get(getApplication()).update { it.copy(playbackMode = playbackMode) }
+        playlistCursor = PlaylistCursor()
+        savePlaylistCursor()
+    }
+    private fun savePlaylistCursor() {
+        savedState["shuffleHistory"] = ArrayList(playlistCursor.history)
+        savedState["shuffleIndex"] = playlistCursor.index
+        savedState["shuffleRemaining"] = ArrayList(playlistCursor.remaining)
+    }
+    fun canMoveInPlaylist(offset: Int) = playlistStep(playlist, activeUri, playbackMode, offset, playlistCursor) != null
     var player by mutableStateOf<ExoPlayer?>(null)
         private set
     var failed by mutableStateOf(false)
@@ -233,9 +250,9 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                                 if (!foreground) stop()
                                 return
                             }
-                            if (AppSettings.get(getApplication()).state.value.autoNext) advance = viewModelScope.launch {
+                            if (playbackMode != PlaybackMode.Off || AppSettings.get(getApplication()).state.value.autoNext) advance = viewModelScope.launch {
                                 yield()
-                                if (player?.playbackState == Player.STATE_ENDED) moveInPlaylist(1)
+                                if (player?.playbackState == Player.STATE_ENDED) moveInPlaylist(1, atEnd = true)
                             }
                         }
                     }
@@ -404,8 +421,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         return true
     }
 
-    fun moveInPlaylist(offset: Int) {
-        val next = adjacentVideo(playlist, activeUri, offset) ?: return
+    fun moveInPlaylist(offset: Int, atEnd: Boolean = false) {
+        val step = playlistStep(playlist, activeUri, playbackMode, offset, playlistCursor, atEnd) ?: return
+        val next = step.video
+        playlistCursor = step.cursor
+        savePlaylistCursor()
         setBackground(false)
         stop()
         clearRepeat()

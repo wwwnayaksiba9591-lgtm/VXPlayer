@@ -277,12 +277,16 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
                 VXIconButton(Icons.Default.Lock, "Lock controls", { locked = true; controls = false; unlockVisible = true; touch() })
-                VXIconButton(Icons.Default.SkipPrevious, "Previous video", { model.moveInPlaylist(-1); touch() }, enabled = model.player != null && adjacentVideo(model.playlist, model.activeUri, -1) != null)
+                VXIconButton(Icons.Default.SkipPrevious, "Previous video", { model.moveInPlaylist(-1); touch() }, enabled = model.player != null && model.canMoveInPlaylist(-1))
                 FilledIconButton(onClick = { model.player?.let { if (it.isPlaying) it.pause() else it.play() }; touch() },
                     modifier = Modifier.size(64.dp), shape = RoundedCornerShape(24.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = .18f), contentColor = Color.White)) {
                     Icon(if (model.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, if (model.isPlaying) "Pause" else "Play", modifier = Modifier.size(36.dp))
                 }
-                VXIconButton(Icons.Default.SkipNext, "Next video", { model.moveInPlaylist(1); touch() }, enabled = model.player != null && adjacentVideo(model.playlist, model.activeUri, 1) != null)
+                VXIconButton(Icons.Default.SkipNext, "Next video", { model.moveInPlaylist(1); touch() }, enabled = model.player != null && model.canMoveInPlaylist(1))
+                TextButton(onClick = { model.cyclePlaybackMode(); touch() }) {
+                    Icon(playbackModeIcon(model.playbackMode), model.playbackMode.label, tint = Color.White)
+                    Text(model.playbackMode.label, color = Color.White, style = MaterialTheme.typography.labelSmall)
+                }
                 VXIconButton(Icons.Default.AspectRatio, "Aspect ratio: ${listOf("Fit", "Fill", "Zoom", "100%")[aspect]}", {
                     aspect = (aspect + 1) % 4; zoom = 1f; feedback(listOf("Fit", "Fill", "Zoom", "100%")[aspect]); touch()
                 })

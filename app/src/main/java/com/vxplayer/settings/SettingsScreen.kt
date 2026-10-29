@@ -28,6 +28,9 @@ fun SettingsScreen(onBack: () -> Unit) {
         Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) { VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack); Text("Settings", style = MaterialTheme.typography.titleLarge) }
             SettingChoice("Default speed", "${settings.speed}x", listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f).map { "${it}x" }) { label -> store.update { it.copy(speed = label.removeSuffix("x").toFloat()) } }
+            SettingChoice("Folder playback", settings.playbackMode.label, com.vxplayer.player.PlaybackMode.entries.map { it.label }) { label ->
+                store.update { it.copy(playbackMode = com.vxplayer.player.PlaybackMode.entries.first { mode -> mode.label == label }) }
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Auto-play next", modifier = Modifier.weight(1f))
                 Switch(settings.autoNext, onCheckedChange = { checked -> store.update { it.copy(autoNext = checked) } })

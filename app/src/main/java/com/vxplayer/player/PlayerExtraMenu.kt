@@ -14,6 +14,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.vxplayer.library.formatDuration
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.ArrowForward
+
+fun playbackModeIcon(mode: PlaybackMode) = when (mode) {
+    PlaybackMode.Off -> Icons.Default.ArrowForward
+    PlaybackMode.RepeatOne -> Icons.Default.RepeatOne
+    PlaybackMode.RepeatFolder -> Icons.Default.Repeat
+    PlaybackMode.Shuffle -> Icons.Default.Shuffle
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +45,8 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
     Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
     DropdownMenuItem(text = { Text("Speed · ${model.speed}×") }, onClick = onSpeed)
+    DropdownMenuItem(text = { Text("Folder playback · ${model.playbackMode.label}") },
+        leadingIcon = { Icon(playbackModeIcon(model.playbackMode), null) }, onClick = { model.cyclePlaybackMode() })
     DropdownMenuItem(text = { Text("Audio enhance · ${model.audioEnhancer.percent}%") }, onClick = { onDismiss(); audioSheet = true })
     if (model.videoEnhancer.available) DropdownMenuItem(text = { Text("Video enhance · ${model.videoEnhancer.preset}") }, onClick = { onDismiss(); enhanceSheet = true })
     else DropdownMenuItem(text = { Text(model.videoEnhancer.reason.orEmpty()) }, onClick = {}, enabled = false)
