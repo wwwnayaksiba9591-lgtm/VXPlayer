@@ -211,6 +211,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             }
             val networkApproved = userMediaSessionAllowed(selectedUri, preferences.contains("streamType:$selectedUri"))
             player = ExoPlayer.Builder(getApplication<Application>())
+                .setUsePlatformDiagnostics(false)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(directMediaFactory(getApplication(), networkApproved))
                     .setLoadErrorHandlingPolicy(DirectMediaLoadErrorPolicy()))
                 .build().apply {
