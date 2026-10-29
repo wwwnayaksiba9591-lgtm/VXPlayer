@@ -21,7 +21,7 @@ android {
         versionCode = 2
         versionName = "1.1.0"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     if (releaseSigningFile.exists()) {
         signingConfigs.create("localRelease") {
             fun required(name: String): String = releaseSigningProperties.getProperty(name)?.takeIf { it.isNotBlank() }
@@ -67,6 +67,7 @@ dependencies {
     implementation(libs.room.ktx)
     implementation(libs.gson)
     implementation(libs.biometric)
+    implementation(libs.splashscreen)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
 }

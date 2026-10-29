@@ -60,6 +60,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.vxplayer.ui.brandSplashExit
 
 class MainActivity : ComponentActivity() {
     var pipMode by mutableStateOf(false)
@@ -98,7 +100,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        brandSplashExit(splash, freshLaunch = savedInstanceState == null)
         enableEdgeToEdge()
         setContent {
             val settings by AppSettings.get(applicationContext).state.collectAsStateWithLifecycle()

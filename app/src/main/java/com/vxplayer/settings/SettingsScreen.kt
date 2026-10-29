@@ -71,6 +71,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             OutlinedButton(onClick = { confirm = true }) { Text("Clear history and resume positions") }
             Text("Track preferences and playback defaults are kept.", style = MaterialTheme.typography.bodySmall)
             result?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            AboutCard()
         }
     }
     if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("Clear playback history?") }, text = { Text("This removes recently played, watched markers, and saved resume positions.") },
