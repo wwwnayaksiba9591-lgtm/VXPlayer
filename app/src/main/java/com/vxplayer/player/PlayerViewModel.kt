@@ -28,6 +28,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.datasource.HttpDataSource
+import com.vxplayer.library.StreamPageProbe
+import com.vxplayer.library.userMediaSessionAllowed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -203,7 +207,10 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     notice = "External subtitle could not be loaded. Playing without subtitles."
                 }
             }
-            player = ExoPlayer.Builder(getApplication<Application>()).build().apply {
+            val networkApproved = userMediaSessionAllowed(selectedUri, preferences.contains("streamType:$selectedUri"))
+            player = ExoPlayer.Builder(getApplication<Application>())
+                .setMediaSourceFactory(DefaultMediaSourceFactory(directMediaFactory(getApplication(), networkApproved)))
+                .build().apply {
                 setWakeMode(C.WAKE_MODE_LOCAL)
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
@@ -240,7 +247,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                     override fun onPlayerError(error: PlaybackException) {
                         val current = player
-                        if (effectsConfigured && current != null) {
+                        val causes = generateSequence<Throwable>(error) { it.cause }.take(20).toList()
+                        if (causes.any { it is HttpDataSource.InvalidContentTypeException && StreamPageProbe.isHtml(it.contentType) }) {
+                            failureMessage = StreamPageProbe.HTML_MESSAGE
+                            failed = true; current?.pause()
+                        } else if (effectsConfigured && current != null && error.errorCode in 7000..7999) {
                             videoEnhancer.unavailable("Enhancement is unsupported on this video path; playing the original.")
                             enhanceOn = false
                             effectsConfigured = false

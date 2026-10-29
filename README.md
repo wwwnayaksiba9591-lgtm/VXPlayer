@@ -2,6 +2,10 @@
 
 An original Android video player using Kotlin, Compose Material 3, Media3 ExoPlayer, MVVM, and Room. Min SDK 24, compile/target SDK 35. VXPlayer is not affiliated with MX Player; its branding, icon, colors, and UI text are original.
 
+**No ads. No tracking. No data leaves your device.** Your library, history, settings, and frame analysis stay local. Streaming necessarily sends requests to the media servers you choose; VXPlayer sends no analytics or crash reports.
+
+The dependency/source/manifest audit found no ad, analytics, tracking, or crash-reporting SDKs. The webpage player has been removed: direct MP4/MKV/WEBM, HLS, and DASH only. HTML is rejected with “This link is a web page, not a direct video link”; no browser, webpage renderer, ad blocker, or site scripts are used. INTERNET is used only by Media3 for explicitly user-entered media sessions, including their playlist/segment requests. Android's manifest permits cleartext so arbitrary user-entered HTTP hosts work; the scoped data-source factory denies all HTTP/HTTPS access for local playback and unregistered links. Cleartext media requests are unencrypted. Connect/read timeouts are 8/12 seconds.
+
 ## Build and verification
 
 Use JDK 17 and Android SDK 35. Set `JAVA_HOME` and configure `sdk.dir` in untracked `local.properties` or set `ANDROID_HOME`.
