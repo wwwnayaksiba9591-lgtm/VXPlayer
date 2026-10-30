@@ -58,11 +58,19 @@ fun VXTheme(settings: PlaybackDefaults, playerMode: Boolean = false, content: @C
             isAppearanceLightNavigationBars = !dark
         } }
     }
-    val colors = when {
+    val baseColors = when {
         playerMode -> VXDarkColors
         settings.dynamicColor && Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         dark -> VXDarkColors
         else -> VXLightColors
     }
+    val tone = when (settings.accent) {
+        "Blue" -> if (dark) Color(0xFFA6CFFF) else Color(0xFF145DA0)
+        "Teal" -> if (dark) Color(0xFF80D5CB) else Color(0xFF006B62)
+        "Green" -> if (dark) Color(0xFFA6D5A2) else Color(0xFF326B35)
+        "Purple" -> if (dark) Color(0xFFD6BAFF) else Color(0xFF7041A0)
+        else -> if (dark) Color(0xFFFFB787) else Color(0xFF954900)
+    }
+    val colors = if (settings.dynamicColor && Build.VERSION.SDK_INT >= 31) baseColors else baseColors.copy(primary = tone, onPrimary = if (dark) Color.Black else Color.White, surfaceTint = tone)
     MaterialTheme(colorScheme = colors, typography = VXTypography, shapes = VXShapes, content = content)
 }

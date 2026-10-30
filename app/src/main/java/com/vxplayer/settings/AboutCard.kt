@@ -19,12 +19,12 @@ import com.vxplayer.R
 
 @Composable
 fun AboutCard() {
-    val flag = remember { if (Paint().hasGlyph("🇮🇳")) "🇮🇳" else "(IN)" }
+    val flag = remember { if (runCatching { Paint().hasGlyph("🇮🇳") }.getOrDefault(false)) "🇮🇳" else "(IN)" }
     val accent = MaterialTheme.colorScheme.primary
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Image(painterResource(R.mipmap.ic_launcher), "VXPlayer app icon", Modifier.size(56.dp))
+            Image(painterResource(R.drawable.ic_launcher_foreground), "VXPlayer app icon", Modifier.size(56.dp))
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge)
             Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
@@ -36,6 +36,7 @@ fun AboutCard() {
             Text(stringResource(R.string.privacy_line), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
             Text(stringResource(R.string.streaming_privacy_detail), style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            com.vxplayer.diagnostics.LastCrashButton()
         }
     }
 }

@@ -27,16 +27,17 @@ fun SettingsScreen(onBack: () -> Unit) {
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) { VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack); Text("Settings", style = MaterialTheme.typography.titleLarge) }
-            SettingChoice("Default speed", "${settings.speed}x", listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f).map { "${it}x" }) { label -> store.update { it.copy(speed = label.removeSuffix("x").toFloat()) } }
+            SettingChoice("Default speed", "${settings.speed}x", listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f).map { "${it}x" }) { label -> store.update { it.copy(speed = label.removeSuffix("x").toFloatOrNull() ?: 1f) } }
             SettingChoice("Folder playback", settings.playbackMode.label, com.vxplayer.player.PlaybackMode.entries.map { it.label }) { label ->
-                store.update { it.copy(playbackMode = com.vxplayer.player.PlaybackMode.entries.first { mode -> mode.label == label }) }
+                store.update { it.copy(playbackMode = com.vxplayer.player.PlaybackMode.entries.firstOrNull { mode -> mode.label == label } ?: com.vxplayer.player.PlaybackMode.Off) }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Auto-play next", modifier = Modifier.weight(1f))
                 Switch(settings.autoNext, onCheckedChange = { checked -> store.update { it.copy(autoNext = checked) } })
             }
             val aspects = listOf("Fit", "Fill", "Zoom", "100%")
-            SettingChoice("Default aspect ratio", aspects[settings.aspect], aspects) { label -> store.update { it.copy(aspect = aspects.indexOf(label)) } }
+            SettingChoice("Default aspect ratio", aspects.getOrElse(settings.aspect) { "Fit" }, aspects) { label -> store.update { it.copy(aspect = aspects.indexOf(label).coerceIn(0,3)) } }
+            SettingChoice("Accent color", settings.accent, listOf("Orange","Blue","Teal","Green","Purple")) { label -> store.update { it.copy(accent = label) } }
             SettingChoice("Default orientation", settings.orientation, listOf("Auto", "System", "Portrait", "Landscape")) { label -> store.update { it.copy(orientation = label) } }
             SettingChoice("Theme", settings.theme, listOf("System", "Light", "Dark")) { label -> store.update { it.copy(theme = label) } }
             if (android.os.Build.VERSION.SDK_INT >= 31) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -47,7 +48,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             Text("Gestures", style = MaterialTheme.typography.titleMedium)
             SettingChoice("Seek swipe sensitivity", settings.seekSensitivity.label,
                 com.vxplayer.player.SeekSensitivity.entries.map { it.label }) { label ->
-                store.update { it.copy(seekSensitivity = com.vxplayer.player.SeekSensitivity.entries.first { level -> level.label == label }) }
+                store.update { it.copy(seekSensitivity = com.vxplayer.player.SeekSensitivity.entries.firstOrNull { level -> level.label == label } ?: com.vxplayer.player.SeekSensitivity.Medium) }
             }
             Text("Full-width swipe: Low 60 s · Medium 120 s · High 240 s", style = MaterialTheme.typography.bodySmall)
             Text("Video", style = MaterialTheme.typography.titleMedium)
@@ -60,7 +61,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Text("Allow volume boost above 100%", modifier = Modifier.weight(1f))
                 Switch(settings.allowBoost, onCheckedChange = { checked -> store.update { it.copy(allowBoost = checked) } })
             }
-            SettingChoice("Max boost", "${settings.maxBoost}%", listOf("150%", "200%")) { label -> store.update { it.copy(maxBoost = label.removeSuffix("%").toInt()) } }
+            SettingChoice("Max boost", "${settings.maxBoost}%", listOf("150%", "200%")) { label -> store.update { it.copy(maxBoost = label.removeSuffix("%").toIntOrNull() ?: 200) } }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Keep boost between videos", modifier = Modifier.weight(1f))
                 Switch(settings.rememberBoost, onCheckedChange = { checked -> store.update { it.copy(rememberBoost = checked) } })

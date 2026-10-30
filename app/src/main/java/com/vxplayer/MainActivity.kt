@@ -142,7 +142,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val destination by navigation.currentBackStackEntryAsState()
+            SideEffect { com.vxplayer.diagnostics.LocalCrashReports.route(destination?.destination?.route ?: "library") }
             VXTheme(settings, playerMode = destination?.destination?.route?.startsWith("player") == true) {
+                com.vxplayer.diagnostics.StartupCrashNotice()
                 NavHost(navigation, startDestination = "library", enterTransition = { fadeIn(tween(180)) },
                     exitTransition = { fadeOut(tween(140)) }, popEnterTransition = { fadeIn(tween(180)) }, popExitTransition = { fadeOut(tween(140)) }) {
                     composable("library") {

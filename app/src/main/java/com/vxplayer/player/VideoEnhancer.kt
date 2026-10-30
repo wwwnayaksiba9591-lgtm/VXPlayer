@@ -8,11 +8,15 @@ import com.vxplayer.settings.AppSettings
 class VideoEnhancer(context: Context) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("vxplayer", 0)
+    private val saved = runCatching { prefs.all }.getOrDefault(emptyMap<String,Any>())
     private val gpuSupported = (app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).deviceConfigurationInfo.reqGlEsVersion >= 0x20000
     private val remember = AppSettings.get(app).state.value.rememberEnhance
-    private var state by mutableStateOf(SmartEnhanceState(prefs.getBoolean("enhanceEnabled", false),
-        smartMode(prefs.getString("smartLastMode", prefs.getString("enhancePreset", "Auto"))).takeUnless { it == "Original" } ?: "Auto").restored(remember))
-    var values by mutableStateOf(if (remember && state.lastMode == "Custom") EnhanceValues(prefs.getFloat("enhanceBrightness", 0f), prefs.getFloat("enhanceContrast", 0f), prefs.getFloat("enhanceSaturation", 1f), prefs.getFloat("enhanceSharpness", 0f), prefs.getFloat("enhanceWarmth", 0f)).bounded() else ENHANCE_PRESETS[state.lastMode] ?: ENHANCE_PRESETS.getValue("Auto"))
+    private var state by mutableStateOf(SmartEnhanceState(com.vxplayer.settings.SettingsParser.boolean(saved["enhanceEnabled"], false),
+        smartMode((saved["smartLastMode"] ?: saved["enhancePreset"]) as? String).takeUnless { it == "Original" } ?: "Auto").restored(remember))
+    var values by mutableStateOf(if (remember && state.lastMode == "Custom") EnhanceValues(
+        com.vxplayer.settings.SettingsParser.number(saved["enhanceBrightness"],0f),com.vxplayer.settings.SettingsParser.number(saved["enhanceContrast"],0f),
+        com.vxplayer.settings.SettingsParser.number(saved["enhanceSaturation"],1f),com.vxplayer.settings.SettingsParser.number(saved["enhanceSharpness"],0f),
+        com.vxplayer.settings.SettingsParser.number(saved["enhanceWarmth"],0f)).bounded() else ENHANCE_PRESETS[state.lastMode] ?: ENHANCE_PRESETS.getValue("Auto"))
         private set
     val enabled get() = state.enabled
     val lastMode get() = state.lastMode
