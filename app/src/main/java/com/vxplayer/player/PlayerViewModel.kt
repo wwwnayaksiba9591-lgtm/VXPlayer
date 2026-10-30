@@ -179,6 +179,16 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private val positions = PlaybackPositionStore.get(application)
     private var starting: Job? = null
     private var checkpoint: Job? = null
+    private val seekRequests = SeekRequests()
+    private var seekWork: Job? = null
+    private var seekWatchdog: Job? = null
+    private var seekSave: Job? = null
+    private var recoverySeek: Long? = null
+    var seekDragging by mutableStateOf(false)
+        private set
+    var seeking by mutableStateOf(false)
+        private set
+    fun changeSeekDragging(value: Boolean) { seekDragging = value }
     private var currentUri: String? = null
     private var privateId: String? = null
     val isPrivatePlayback: Boolean get() = privateId != null
@@ -436,7 +446,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
             }
             monitor = viewModelScope.launch {
                 while (true) {
-                    delay(100)
+                    delay(250)
                     audioEnhancer.syncSystemVolume()
                     val current = player ?: break
                     val end = bMs
@@ -447,6 +457,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                 }
             }
+            recoverySeek?.let { target -> recoverySeek = null; seekTo(target) }
         }
     }
 
@@ -548,14 +559,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private fun refreshEnhancement() {
         player?.let { configureEnhancement(it) }
         repaint?.cancel()
-        repaint = viewModelScope.launch {
-            delay(16)
-            val current = player
-            if (current != null && !current.isPlaying && current.playbackState == Player.STATE_READY && foreground && !backgroundEnabled && !pipActive) {
-                val target = current.currentPosition + 1L
-                current.seekTo(if (current.duration > 0L) target.coerceAtMost(current.duration) else target)
-            }
-        }
+        // Live uniforms update with the next rendered frame; never force decoder seeks to repaint.
     }
 
     private fun restoreTrackChoices(value: Tracks) {
@@ -754,20 +758,60 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun seekBy(offsetMs: Long): Boolean {
         val current = player ?: return false
         if (!current.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) || !current.isCurrentMediaItemSeekable) return false
-        val duration = current.duration
-        current.seekTo(seekWithOffset(current.currentPosition, offsetMs, duration))
-        savePlaybackState()
+        seekTo(seekWithOffset(seekRequests.pending ?: current.currentPosition, offsetMs, current.duration))
         return true
     }
 
-    fun seekTo(position: Long) {
+    fun seekTo(position: Long, exact: Boolean = false) {
         val current = player ?: return
         if (!current.isCurrentMediaItemSeekable) return
-        current.seekTo(boundedSeek(position, current.duration))
-        savePlaybackState()
+        seekRequests.request(position,current.duration,SystemClock.elapsedRealtime())
+        seekWork?.cancel(); seekWatchdog?.cancel(); seekSave?.cancel()
+        seeking = true
+        seekWork = viewModelScope.launch {
+            delay(100)
+            val target = seekRequests.take(SystemClock.elapsedRealtime()) ?: return@launch
+            if (player !== current) return@launch
+            current.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+            current.seekTo(target)
+            buffering = true
+            seekWatchdog = viewModelScope.launch {
+                var started = SystemClock.elapsedRealtime()
+                var retried = false
+                var anchor = current.currentPosition
+                while (player === current) {
+                    delay(250)
+                    val elapsed = SystemClock.elapsedRealtime() - started
+                    val ready = current.playbackState == Player.STATE_READY
+                    if (current.playbackState == Player.STATE_ENDED || (ready && (!current.playWhenReady || current.currentPosition > anchor + 250))) {
+                        seeking = false; buffering = false
+                        seekSave = viewModelScope.launch { delay(600); savePlaybackState() }
+                        break
+                    }
+                    if (elapsed >= 5000 && current.playbackState == Player.STATE_BUFFERING && effectsConfigured && !effectsDisabled) {
+                        recoverySeek = target
+                        disableEffectsForVideo("Enhancement stalled after seeking; playing without effects.")
+                        rebuildEnhancementPlayer(videoEnhancer.reason)
+                        break
+                    }
+                    if (elapsed >= 8000) {
+                        if (!retried) {
+                            retried = true; current.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+                            current.seekTo(boundedSeek(target,current.duration)); if (current.playWhenReady) current.prepare()
+                            anchor = current.currentPosition; started = SystemClock.elapsedRealtime()
+                        } else {
+                            seeking = false; buffering = false; failed = true; current.pause()
+                            failureMessage = "Playback stalled after seeking. Retry or try another video."
+                            break
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun stop(keepBackgroundPlayer: Boolean = false) {
+        seekWork?.cancel(); seekWatchdog?.cancel(); seekSave?.cancel(); seekRequests.cancel(); seeking = false; seekDragging = false
         subtitleWork?.cancel(); subtitleWork = null
         rebuilding?.cancel(); rebuilding = null
         effectsConfigured = false

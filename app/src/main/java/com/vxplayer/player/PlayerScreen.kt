@@ -98,18 +98,14 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
     var pulseZone by remember { mutableIntStateOf(0) }
     var pulseTick by remember { mutableIntStateOf(0) }
     val pulse = remember { Animatable(0f) }
-    var position by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
-    var slider by remember { mutableStateOf<Float?>(null) }
-    var remaining by rememberSaveable { mutableStateOf(false) }
     fun feedback(text: String) { indicator = text; indicatorTick++ }
     fun touch() { interaction++ }
     LaunchedEffect(model.notice) { model.notice?.let { feedback(it) } }
     LaunchedEffect(playerView, model.player, model.isPlaying, model.videoEnhancer.enabled,
-        model.videoEnhancer.lastMode, model.videoEnhancer.suspended, model.videoEnhancer.comparing, model.videoEnhancer.available) {
+        model.videoEnhancer.lastMode, model.videoEnhancer.suspended, model.videoEnhancer.comparing, model.videoEnhancer.available, model.seeking, model.seekDragging, model.buffering) {
         val view = playerView
         val engine = model.videoEnhancer
-        if (view != null && model.isPlaying && engine.enabled && engine.available && engine.lastMode == "Auto" && !engine.suspended && !engine.comparing) {
+        if (view != null && model.isPlaying && engine.enabled && engine.available && engine.lastMode == "Auto" && !engine.suspended && !engine.comparing && !model.seeking && !model.seekDragging && !model.buffering) {
             while (true) {
                 if (model.foreground && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.autoEnhanceSample(sampleVideoFrame(view))
                 delay(1500)
@@ -117,15 +113,8 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         }
     }
     BackHandler(locked && !inPip) { unlockVisible = true; touch() }
-    LaunchedEffect(model.player) {
-        while (true) {
-            position = model.player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-            duration = model.player?.duration?.coerceAtLeast(0L) ?: 0L
-            delay(250)
-        }
-    }
-    LaunchedEffect(controls, interaction, model.isPlaying, menu, speedSheet, enhanceSheet, model.choosingSubtitle, swiping, slider) {
-        if (controls && model.isPlaying && !menu && !speedSheet && !enhanceSheet && !model.choosingSubtitle && !swiping && slider == null) { delay(3000); controls = false }
+    LaunchedEffect(controls, interaction, model.isPlaying, menu, speedSheet, enhanceSheet, model.choosingSubtitle, swiping, model.seekDragging) {
+        if (controls && model.isPlaying && !menu && !speedSheet && !enhanceSheet && !model.choosingSubtitle && !swiping && !model.seekDragging) { delay(3000); controls = false }
     }
     LaunchedEffect(indicatorTick, swiping, heldSpeed) { if (!swiping && heldSpeed == null) { delay(1000); indicator = null } }
     LaunchedEffect(pulseTick) {
@@ -243,15 +232,15 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
                     feedback(model.audioEnhancer.message ?: "Volume ${model.audioEnhancer.percent}%")
                 }
             }
-            view.onHorizontalStart = { swiping = true; seekStart = model.player?.currentPosition ?: 0L }
+            view.onHorizontalStart = { swiping = true; model.changeSeekDragging(true); seekStart = model.player?.currentPosition ?: 0L }
             view.onHorizontal = { distanceDp, widthDp ->
                 if (model.player?.isCurrentMediaItemSeekable == true) {
-                    val target = seekPreview(seekStart, distanceDp, widthDp, duration, defaults.seekSensitivity); seekTarget = target
+                    val target = seekPreview(seekStart, distanceDp, widthDp, model.player?.duration ?: 0L, defaults.seekSensitivity); seekTarget = target
                     val delta = (target - seekStart) / 1000
                     feedback("${formatDuration(target)} (${if (delta >= 0) "+" else ""}$delta s)")
                 } else feedback("Seeking is not available for this stream")
             }
-            view.onGestureEnd = { cancelled -> if (!cancelled) seekTarget?.let { model.seekTo(it) }; seekTarget = null; swiping = false; touch() }
+            view.onGestureEnd = { cancelled -> if (!cancelled) seekTarget?.let { model.seekTo(it) }; seekTarget = null; swiping = false; model.changeSeekDragging(false); touch() }
             view.onZoom = { factor -> zoom = (zoom * factor).coerceIn(1f, 4f); feedback("Zoom ${(zoom * 100).roundToInt()}%") }
             view.onHold = { held ->
                 if (held && heldSpeed == null) { heldSpeed = model.speed; model.changeSpeed(2f); feedback("2× while held") }
@@ -287,19 +276,7 @@ fun PlayerScreen(uri: Uri, title: String, onBack: () -> Unit, folder: String = "
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().overlayVisible(visible, locked || inPip)
             .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .55f), Color.Black.copy(alpha = .9f))))
             .safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(formatDuration(slider?.toLong() ?: position), color = Color.White, style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), maxLines = 1)
-                val sliderColors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = .3f))
-                Slider(value = slider ?: position.toFloat().coerceAtMost(duration.toFloat()), onValueChange = { slider = it; touch() },
-                    onValueChangeFinished = { slider?.let { model.seekTo(it.toLong()) }; slider = null; touch() },
-                    valueRange = 0f..duration.coerceAtLeast(1L).toFloat(), enabled = duration > 0 && model.player?.isCurrentMediaItemSeekable == true, colors = sliderColors, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                    thumb = { Box(Modifier.size(12.dp, 24.dp).background(Color.White, RoundedCornerShape(6.dp))) },
-                    track = { state -> SliderDefaults.Track(sliderState = state, colors = sliderColors, modifier = Modifier.height(8.dp)) })
-                TextButton(onClick = { remaining = !remaining; touch() }) {
-                    Text(if (duration <= 0) "--:--" else if (remaining) "−${formatDuration(duration - position)}" else formatDuration(duration), color = Color.White,
-                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), maxLines = 1)
-                }
-            }
+            PlaybackTimeline(model, visible && !inPip, ::touch)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
                 SmartEnhanceControl(model, openModes = { enhanceSheet = true }, touch = { touch() })
                 VXIconButton(Icons.Default.Lock, "Lock controls", { locked = true; controls = false; unlockVisible = true; touch() })

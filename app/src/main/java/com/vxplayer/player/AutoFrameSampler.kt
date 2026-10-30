@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.HandlerThread
 import android.view.PixelCopy
 import android.view.SurfaceView
 import android.view.TextureView
@@ -13,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+
+private val frameCopyHandler by lazy { Handler(HandlerThread("VX-frame-copy").apply { start() }.looper) }
 
 @androidx.annotation.OptIn(UnstableApi::class)
 suspend fun sampleVideoFrame(view: PlayerView): FrameSummary? {
@@ -25,7 +28,7 @@ suspend fun sampleVideoFrame(view: PlayerView): FrameSummary? {
                     PixelCopy.request(surface, small, { result ->
                         if (result == PixelCopy.SUCCESS && continuation.isActive) continuation.resume(small)
                         else { small.recycle(); if (continuation.isActive) continuation.resume(null) }
-                    }, Handler(Looper.getMainLooper()))
+                    }, frameCopyHandler)
                 } catch (_: RuntimeException) { small.recycle(); if (continuation.isActive) continuation.resume(null) }
             }
         } else (surface as? TextureView)?.getBitmap(32, 18)
