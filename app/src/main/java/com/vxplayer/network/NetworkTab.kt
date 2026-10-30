@@ -23,6 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vxplayer.library.StreamUrls
@@ -35,7 +38,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewModel()) {
+fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewModel(), onOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val links by model.links.collectAsStateWithLifecycle()
     val recent = recentNetworkLinks(links)
@@ -53,6 +56,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
     var editing by remember { mutableStateOf<NetworkLink?>(null) }
     var favouriteName by rememberSaveable { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
     val validation = if (url.isBlank()) null else runCatching { StreamUrls.validate(url) }.exceptionOrNull()?.message
     fun clipboardText(): String? {
         val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -71,6 +75,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                     val selected = model.repository.played(link.copy(streamType = "Web", subtitleUri = null, subtitleName = null), true)
                     WebPlayerActivity.open(context, selected.url)
                 } else onPlay(model.repository.played(link, replaceAttachment))
+                onOpened()
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message ?: "Could not open this link. Try again." }
@@ -78,6 +83,15 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
         }
     }
     fun edit(link: NetworkLink) { editing = link; favouriteName = link.name.ifBlank { link.title } }
+    fun remove(link: NetworkLink, favourite: Boolean) {
+        scope.launch {
+            try {
+                if (favourite) model.repository.unfavourite(link.url) else model.repository.removeRecent(link.url)
+                if (snackbar.showSnackbar("Link removed",actionLabel = "Undo",duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed) model.repository.restore(link)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { error = "Could not update saved links. Try again." }
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
         if (selected != null) {
             try {
@@ -90,6 +104,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
             } catch (failure: Exception) { error = failure.message ?: "Could not attach this subtitle." }
         }
     }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
@@ -98,7 +113,13 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                         Icon(Icons.Default.Language, null, tint = MaterialTheme.colorScheme.primary)
                         Text("Open a video link", style = MaterialTheme.typography.titleLarge)
                     }
-                    OutlinedTextField(url, onValueChange = { url = it; error = null }, label = { Text("HTTP / HTTPS video URL") },
+                    OutlinedTextField(url, onValueChange = { url = it; error = null }, label = { Text("Paste a video link") },
+                        placeholder = { Text("https://example.com/video.mp4") }, leadingIcon = { Icon(Icons.Default.Link,null) },
+                        trailingIcon = { Row {
+                            IconButton(onClick = { url = runCatching { clipboardText() }.getOrNull().orEmpty(); error = null }, enabled = !busy) { Icon(Icons.Default.ContentPaste,"Paste") }
+                            IconButton(onClick = { url = ""; error = null }, enabled = !busy && url.isNotEmpty()) { Icon(Icons.Default.Clear,"Clear") }
+                        } }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { if (!busy && url.isNotBlank() && validation == null) play(NetworkLink(StreamUrls.validate(url),name.trim(),streamType = type,subtitleUri = subtitle,subtitleName = subtitleName),attachmentChanged) }),
                         modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy, isError = validation != null,
                         supportingText = { Text(validation ?: if (WebPageRoutes.useWeb(url, type))
                             "Video page detected. Play opens the web player with Shield ON." else
@@ -126,10 +147,12 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                     Text("HTTP is unencrypted. Links and access tokens are stored locally.", style = MaterialTheme.typography.bodySmall)
                     if (WebPageRoutes.useWeb(url, type)) Text("Tap the video's play icon after the page opens. Web pages use their own controls and subtitles.", style = MaterialTheme.typography.bodySmall)
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (error != null) TextButton(onClick = { play(NetworkLink(StreamUrls.validate(url),name.trim(),streamType = type,subtitleUri = subtitle,subtitleName = subtitleName),attachmentChanged) }, enabled = !busy && url.isNotBlank() && validation == null) { Text("Retry") }
                     Button(onClick = { play(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = type,
                         subtitleUri = subtitle, subtitleName = subtitleName), attachmentChanged) },
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.PlayArrow, null); Text(if (busy) "Opening…" else if (WebPageRoutes.useWeb(url, type)) "Play in web player" else "Play")
+                        if (busy) CircularProgressIndicator(Modifier.size(20.dp),strokeWidth = 2.dp) else Icon(Icons.Default.PlayArrow, null)
+                        Text(if (busy) "Opening…" else if (WebPageRoutes.useWeb(url, type)) "Play in web player" else "Play")
                     }
                     OutlinedButton(onClick = { play(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = "Web")) },
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
@@ -146,7 +169,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
         model.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
         if (favourites.isNotEmpty()) item { Text("Favourites", style = MaterialTheme.typography.titleMedium) }
         items(favourites, key = { "favourite:${it.url}" }) { link ->
-            NetworkLinkCard(link, model.positions[link.url], busy, { play(link) }, { edit(link) }, { model.action { unfavourite(link.url) } }, "Remove favourite")
+            NetworkLinkCard(link, model.positions[link.url], busy, { play(link) }, { edit(link) }, { remove(link,true) }, "Remove favourite", { remove(link,true) })
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -155,7 +178,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
             }
         }
         items(recent, key = { "recent:${it.url}" }) { link ->
-            NetworkLinkCard(link, model.positions[link.url], busy, { play(link) }, { edit(link) }, { model.action { removeRecent(link.url) } }, "Remove recent link")
+            NetworkLinkCard(link, model.positions[link.url], busy, { play(link) }, { edit(link) }, { remove(link,false) }, "Remove recent link", { if (link.favourite) remove(link,true) else edit(link) })
         }
         if (recent.isEmpty() && favourites.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -164,6 +187,8 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                 Text("Paste a direct video or playlist link. Recent links and favourites will appear here.", style = MaterialTheme.typography.bodyMedium)
             }
         }
+    }
+    SnackbarHost(snackbar,Modifier.align(Alignment.BottomCenter).imePadding())
     }
     if (clear) AlertDialog(onDismissRequest = { clear = false }, title = { Text("Clear recent links?") },
         text = { Text("Favourites and saved resume positions are kept.") },
@@ -178,7 +203,10 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
 }
 
 @Composable
-private fun NetworkLinkCard(link: NetworkLink, position: Long?, busy: Boolean, play: () -> Unit, edit: () -> Unit, remove: () -> Unit, removeLabel: String) {
+private fun NetworkLinkCard(link: NetworkLink, position: Long?, busy: Boolean, play: () -> Unit, edit: () -> Unit, remove: () -> Unit, removeLabel: String, star: () -> Unit) {
+    val dismiss = rememberSwipeToDismissBoxState(confirmValueChange = { value -> if (value != SwipeToDismissBoxValue.Settled) { remove(); true } else false })
+    SwipeToDismissBox(state = dismiss, enableDismissFromStartToEnd = !busy, enableDismissFromEndToStart = !busy,
+        backgroundContent = { Box(Modifier.fillMaxSize().padding(20.dp),contentAlignment = Alignment.CenterEnd) { Icon(Icons.Default.DeleteOutline,removeLabel) } }) {
     Card(Modifier.fillMaxWidth().combinedClickable(enabled = !busy, onClick = play, onLongClick = edit)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -186,7 +214,7 @@ private fun NetworkLinkCard(link: NetworkLink, position: Long?, busy: Boolean, p
                     Text(link.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(Uri.parse(link.url).host.orEmpty(), style = MaterialTheme.typography.labelSmall)
                 }
-                VXIconButton(if (link.favourite) Icons.Default.Star else Icons.Outlined.StarBorder, "Edit favourite", edit, !busy)
+                VXIconButton(if (link.favourite) Icons.Default.Star else Icons.Outlined.StarBorder, "Toggle favourite (long press row to rename)", star, !busy)
                 VXIconButton(Icons.Default.DeleteOutline, removeLabel, remove, !busy)
             }
             Text(link.url, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -194,5 +222,6 @@ private fun NetworkLinkCard(link: NetworkLink, position: Long?, busy: Boolean, p
             else if (position != null && position > 0) Text("Resume · ${formatDuration(position)}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             link.subtitleName?.let { Text("SRT · $it", style = MaterialTheme.typography.labelSmall) }
         }
+    }
     }
 }

@@ -78,6 +78,8 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     var descending by remember { mutableStateOf(preferences.getBoolean("descending", false)) }
     var sortOpen by remember { mutableStateOf(false) }
     var appMenu by remember { mutableStateOf(false) }
+    var openUrl by rememberSaveable { mutableStateOf(false) }
+    if (openUrl) com.vxplayer.network.OpenUrlSheet(onPlay = { link -> onVideoClick(Video(Uri.parse(link.url),link.title,0L,0L),"") }, onDismiss = { openUrl = false })
     val folderScroll = rememberLazyListState()
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
@@ -124,6 +126,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 Box {
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
+                        DropdownMenuItem(text = { Text("Open URL") }, onClick = { appMenu = false; openUrl = true })
                         DropdownMenuItem(text = { Text("Open video file") }, onClick = { appMenu = false; filePicker.launch(arrayOf("*/*")) })
                         DropdownMenuItem(text = { Text("Settings") }, onClick = { appMenu = false; onSettings() })
                         DropdownMenuItem(text = { Text("Private") }, onClick = {
@@ -145,17 +148,14 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 }
                 TextButton(onClick = { grid = !grid; preferences.edit().putBoolean("grid", grid).apply() }) { Text(if (grid) "List" else "Grid") }
             }
-            if (selectedFolder == null) TabRow(selectedTabIndex = tab) {
-                listOf("Folders", "Videos", "Recent", "Network").forEachIndexed { index, label ->
+            if (selectedFolder == null) TabRow(selectedTabIndex = tab.coerceIn(0,2)) {
+                listOf("Folders", "Videos", "Recent").forEachIndexed { index, label ->
                     Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
                 }
             }
             Crossfade(targetState = tab, animationSpec = tween(160), label = "library tabs", modifier = Modifier.weight(1f)) { displayedTab ->
             PullToRefreshBox(isRefreshing = displayedTab != 3 && state.loading, onRefresh = { if (displayedTab != 3) model.refresh(access()) }, modifier = Modifier.fillMaxSize()) {
             when {
-                selectedFolder == null && displayedTab == 3 -> com.vxplayer.network.NetworkTab(onPlay = { link ->
-                    onVideoClick(Video(Uri.parse(link.url), link.title, 0L, 0L), "")
-                })
                 !allowed -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
                     FolderIcon()
                     Text("Your video library", style = MaterialTheme.typography.headlineSmall)

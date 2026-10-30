@@ -25,7 +25,7 @@ class DirectMediaLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
 /** The only HTTP entry point. Local playback has no network capability. */
 @androidx.annotation.OptIn(UnstableApi::class)
 fun directMediaFactory(context: Context, approved: Boolean): DataSource.Factory {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("VXPlayer/1.1")
+    val http = DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 (Android) VXPlayer/${com.vxplayer.BuildConfig.VERSION_NAME}")
         .setConnectTimeoutMs(8000).setReadTimeoutMs(12000).setAllowCrossProtocolRedirects(true)
         .setContentTypePredicate { !StreamPageProbe.isHtml(it) }
     return DefaultDataSource.Factory(context, DataSource.Factory { DirectMediaDataSource(http.createDataSource(), approved) })

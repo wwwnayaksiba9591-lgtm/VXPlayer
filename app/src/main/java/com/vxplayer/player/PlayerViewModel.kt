@@ -365,11 +365,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                             failed = true; current?.pause()
                         } else {
                             val httpError = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
-                            failureMessage = if (httpError != null) when (httpError.responseCode) {
-                                403 -> "Access denied (403). This link may require permission or may have expired."
-                                404 -> "Video not found (404). Check the link."
-                                else -> "The media server returned HTTP ${httpError.responseCode}. Retry or check the link."
-                            } else if (error.errorCode in 4000..4999) {
+                            failureMessage = if (httpError != null) com.vxplayer.network.streamErrorMessage(status = httpError.responseCode) else if (error.errorCode in 4000..4999) {
                                 val format = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat ?: sourceFormat
                                 "The device could not decode this format after decoder fallback. ${format?.let(::formatDetails) ?: "Codec details are available in Copy report."}"
                             } else if (selectedUri.startsWith("http", true)) when (error.errorCode) {

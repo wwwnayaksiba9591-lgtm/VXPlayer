@@ -74,6 +74,7 @@ class NetworkRepository(context: Context) {
         if (it.url != url) it else if (it.lastPlayedAt > 0) it.copy(favourite = false) else null
     } }
     suspend fun clearRecent() = mutate { old -> old.filter { it.favourite }.map { it.copy(lastPlayedAt = 0) } }
+    suspend fun restore(link: NetworkLink) = mutate { restoreNetworkLink(it,link) }
     suspend fun subtitle(url: String, uri: String, name: String) = db.withTransaction {
         dao.find(url)?.let { dao.save(it.copy(subtitleUri = uri, subtitleName = name)) }
     }
