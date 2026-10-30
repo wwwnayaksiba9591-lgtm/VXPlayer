@@ -191,11 +191,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     fun changeSeekDragging(value: Boolean) { seekDragging = value }
     private var currentUri: String? = null
     private var privateId: String? = null
+    private val pauseForMusic: () -> Unit = { savedState["playWhenReady"] = false; player?.pause(); if (backgroundEnabled) setBackground(false); if (!foreground) stop() }
     val isPrivatePlayback: Boolean get() = privateId != null
     private val privatePositions = application.getSharedPreferences("private-playback", 0)
 
     // Only lightweight playback state survives rotation; the decoder and surface are released.
     fun start(uri: Uri, title: String, folder: String = savedState.get<String>("folder").orEmpty()) {
+        PlaybackCoordinator.registerVideo(this,pauseForMusic)
         if (player != null || starting?.isActive == true) return
         failed = false
         notice = null
@@ -378,6 +380,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         if (player !== owner) return
+                        if (playing) PlaybackCoordinator.startingVideo(this@PlayerViewModel)
                         this@PlayerViewModel.isPlaying = playing
                         if (playing && !isPrivatePlayback) currentUri?.let { positions.recordPlayed(it, activeTitle) }
                         if (!playing) savePlaybackState()
@@ -453,7 +456,16 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                 }
             }
-            recoverySeek?.let { target -> recoverySeek = null; seekTo(target) }
+            recoverySeek?.let { target ->
+                recoverySeek = null
+                seekWork = viewModelScope.launch {
+                    repeat(24) {
+                        if (player?.isCurrentMediaItemSeekable == true) { seekTo(target); return@launch }
+                        delay(250)
+                    }
+                    failed = true; failureMessage = "Playback could not recover after seeking. Retry this video."
+                }
+            }
         }
     }
 
@@ -807,6 +819,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun stop(keepBackgroundPlayer: Boolean = false) {
+        if (!keepBackgroundPlayer) PlaybackCoordinator.unregisterVideo(this)
         seekWork?.cancel(); seekWatchdog?.cancel(); seekSave?.cancel(); seekRequests.cancel(); seeking = false; seekDragging = false
         subtitleWork?.cancel(); subtitleWork = null
         rebuilding?.cancel(); rebuilding = null

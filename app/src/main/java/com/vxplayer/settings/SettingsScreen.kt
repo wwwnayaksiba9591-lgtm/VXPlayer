@@ -57,6 +57,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Switch(settings.rememberEnhance, onCheckedChange = { checked -> store.update { it.copy(rememberEnhance = checked) } })
             }
             Text("Audio", style = MaterialTheme.typography.titleMedium)
+            val musicPreferences = remember(context) { context.getSharedPreferences("vxplayer",0) }
+            var hideShortMusic by remember { mutableStateOf(SettingsParser.boolean(musicPreferences.all["hideShortMusic"],true)) }
+            Row(Modifier.fillMaxWidth(),verticalAlignment = Alignment.CenterVertically) {
+                Text("Music: hide tracks shorter than 30 s",Modifier.weight(1f))
+                Switch(hideShortMusic,{hideShortMusic=it;musicPreferences.edit().putBoolean("hideShortMusic",it).apply()})
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Allow volume boost above 100%", modifier = Modifier.weight(1f))
                 Switch(settings.allowBoost, onCheckedChange = { checked -> store.update { it.copy(allowBoost = checked) } })

@@ -44,9 +44,9 @@ class AudioEnhancer(context: Context) {
         private set
     var nightAvailable by mutableStateOf(false)
         private set
-    var bassStrength by mutableIntStateOf(prefs.getInt("bassStrength", 0).coerceIn(0, 1000))
+    var bassStrength by mutableIntStateOf(com.vxplayer.settings.SettingsParser.integer(prefs.all["bassStrength"], 0).coerceIn(0, 1000))
         private set
-    var night by mutableStateOf(prefs.getBoolean("nightAudio", false))
+    var night by mutableStateOf(com.vxplayer.settings.SettingsParser.boolean(prefs.all["nightAudio"], false))
         private set
     var warning by mutableStateOf(false)
         private set
@@ -93,7 +93,7 @@ class AudioEnhancer(context: Context) {
         val defaults = AppSettings.get(app).state.value
         var target = boundedVolume(requested, defaults.allowBoost, defaults.maxBoost)
         if (!boostAvailable) target = target.coerceAtMost(100)
-        if (needsBoostWarning(target, prefs.getBoolean("boostWarningAcknowledged", false))) {
+        if (needsBoostWarning(target, com.vxplayer.settings.SettingsParser.boolean(prefs.all["boostWarningAcknowledged"], false))) {
             pendingWarning = target; warning = true
             return
         }

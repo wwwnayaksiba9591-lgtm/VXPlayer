@@ -14,7 +14,7 @@ data class SettingsBackup(val settings: Map<String, Any>, val positions: Map<Str
 
 object BackupCodec {
     const val MAX_BYTES = 4 * 1024 * 1024
-    private val booleans = setOf("autoNext", "dynamicColor", "allowBoost", "rememberBoost", "rememberEnhance", "descending", "grid", "nightAudio", "enhanceEnabled")
+    private val booleans = setOf("autoNext", "dynamicColor", "allowBoost", "rememberBoost", "rememberEnhance", "descending", "grid", "nightAudio", "enhanceEnabled", "hideShortMusic")
     private val floats = mapOf("defaultSpeed" to .5f..2f, "subtitleSize" to 12f..36f,
         "enhanceBrightness" to -0.25f..0.25f, "enhanceContrast" to -0.5f..0.5f,
         "enhanceSaturation" to 0f..2f, "enhanceSharpness" to -0.5f..1f, "enhanceWarmth" to -0.2f..0.2f)

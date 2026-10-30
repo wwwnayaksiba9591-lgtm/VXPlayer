@@ -19,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import com.vxplayer.network.*
+import com.vxplayer.music.*
 
 @Entity(tableName = "playback_positions")
 data class PlaybackPosition(@PrimaryKey val uri: String, val positionMs: Long)
@@ -38,13 +39,14 @@ interface PlaybackPositionDao {
     suspend fun clear(uri: String)
 }
 
-@Database(entities = [PlaybackPosition::class, RecentlyPlayed::class, WatchedVideo::class, TrackPreference::class, NetworkLink::class], version = 5, exportSchema = false)
+@Database(entities = [PlaybackPosition::class, RecentlyPlayed::class, WatchedVideo::class, TrackPreference::class, NetworkLink::class, MusicStat::class, MusicPlaylist::class, MusicPlaylistItem::class, MusicSessionState::class], version = 6, exportSchema = false)
 abstract class PlaybackDatabase : RoomDatabase() {
     abstract fun positions(): PlaybackPositionDao
     abstract fun recentlyPlayed(): RecentlyPlayedDao
     abstract fun watched(): WatchedVideoDao
     abstract fun trackPreferences(): TrackPreferenceDao
     abstract fun networkLinks(): NetworkLinkDao
+    abstract fun music(): MusicDao
     companion object {
         @Volatile private var instance: PlaybackDatabase? = null
         fun get(context: Context): PlaybackDatabase = instance ?: synchronized(this) {
@@ -52,7 +54,7 @@ abstract class PlaybackDatabase : RoomDatabase() {
                 val app = context.applicationContext
                 val prefs = app.getSharedPreferences("vxplayer", 0)
                 Room.databaseBuilder(app, PlaybackDatabase::class.java, "playback.db")
-                    .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3, PLAYBACK_MIGRATION_3_4, NetworkMigration(prefs))
+                    .addMigrations(PLAYBACK_MIGRATION_1_2, PLAYBACK_MIGRATION_2_3, PLAYBACK_MIGRATION_3_4, NetworkMigration(prefs), MUSIC_MIGRATION_5_6)
                     .addCallback(NetworkCreation(prefs)).build()
             }.also { instance = it }
         }

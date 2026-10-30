@@ -33,6 +33,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -58,24 +59,28 @@ private fun permissions() = when {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit = {}, model: VideoLibraryViewModel = viewModel(), requestOnLaunch: Boolean = true) {
+fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit = {}, model: VideoLibraryViewModel = viewModel(), requestOnLaunch: Boolean = true,
+    openMusic: Boolean = false, onMusicOpened: () -> Unit = {}) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val resumeModel: ResumeViewModel = viewModel()
+    val musicModel: com.vxplayer.music.MusicViewModel = viewModel()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     fun resume(fromStart: Boolean = false) { resumeModel.play(fromStart, onVideoClick) { scope.launch { snackbar.showSnackbar("Video not found") } } }
     fun access() = permissions().any { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     var allowed by remember { mutableStateOf(access()) }
     var requested by rememberSaveable { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(1) }
     var selectedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(openMusic) { if (openMusic) { tab = 3; selectedFolder = null; musicModel.nowPlaying = true; onMusicOpened() } }
+    com.vxplayer.music.MusicOverlays(musicModel)
     val preferences = remember(context) { context.getSharedPreferences("vxplayer", 0) }
     var query by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf(false) }
-    var grid by remember { mutableStateOf(preferences.getBoolean("grid", false)) }
-    var sort by remember { mutableStateOf(runCatching { LibrarySort.valueOf(preferences.getString("sort", "Name")!!) }.getOrDefault(LibrarySort.Name)) }
-    var descending by remember { mutableStateOf(preferences.getBoolean("descending", false)) }
+    var grid by remember { mutableStateOf(com.vxplayer.settings.SettingsParser.boolean(preferences.all["grid"],false)) }
+    var sort by remember { mutableStateOf(com.vxplayer.settings.SettingsParser.enum(preferences.all["sort"],LibrarySort.Name)) }
+    var descending by remember { mutableStateOf(com.vxplayer.settings.SettingsParser.boolean(preferences.all["descending"],false)) }
     var sortOpen by remember { mutableStateOf(false) }
     var appMenu by remember { mutableStateOf(false) }
     var openUrl by rememberSaveable { mutableStateOf(false) }
@@ -84,6 +89,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     val videosScroll = rememberLazyListState()
     val recentScroll = rememberLazyListState()
     val gridScroll = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val tabStates = rememberSaveableStateHolder()
     val detailScroll = rememberSaveable(selectedFolder, saver = LazyListState.Saver) { LazyListState() }
     val state by model.state.collectAsStateWithLifecycle()
     LaunchedEffect(state.folders, state.recentlyPlayed) { resumeModel.refresh(state.folders.flatMap { it.videos }) }
@@ -116,13 +122,13 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     Surface(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding()) {
-            TopAppBar(windowInsets = WindowInsets(0, 0, 0, 0), title = {
+            if (tab != 3) TopAppBar(windowInsets = WindowInsets(0, 0, 0, 0), title = {
                 Text(folder?.name ?: "VXPlayer", maxLines = 1, overflow = TextOverflow.Ellipsis)
             }, navigationIcon = {
                 if (selectedFolder != null) VXIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back to folders", { selectedFolder = null; tab = 0 })
             }, actions = {
                 VXIconButton(Icons.Default.History, "Last played", { resume() }, enabled = resumeModel.candidate != null && !resumeModel.busy)
-                if (tab != 3) VXIconButton(Icons.Default.Search, "Search library", { search = !search; if (!search) query = "" })
+                if (tab in 0..2) VXIconButton(Icons.Default.Search, "Search library", { search = !search; if (!search) query = "" })
                 Box {
                     VXIconButton(Icons.Default.MoreVert, "Library menu", { appMenu = true })
                     DropdownMenu(appMenu, onDismissRequest = { appMenu = false }) {
@@ -138,7 +144,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 }
             })
             if (search && tab != 3) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
-            if (tab != 3) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            if (tab in 0..2) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Box {
                     TextButton(onClick = { sortOpen = true }) { Text("Sort: $sort") }
                     DropdownMenu(sortOpen, onDismissRequest = { sortOpen = false }) {
@@ -148,14 +154,18 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                 }
                 TextButton(onClick = { grid = !grid; preferences.edit().putBoolean("grid", grid).apply() }) { Text(if (grid) "List" else "Grid") }
             }
-            if (selectedFolder == null) TabRow(selectedTabIndex = tab.coerceIn(0,2)) {
-                listOf("Folders", "Videos", "Recent").forEachIndexed { index, label ->
-                    Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
-                }
-            }
             Crossfade(targetState = tab, animationSpec = tween(160), label = "library tabs", modifier = Modifier.weight(1f)) { displayedTab ->
+            tabStates.SaveableStateProvider(displayedTab) {
             PullToRefreshBox(isRefreshing = displayedTab != 3 && state.loading, onRefresh = { if (displayedTab != 3) model.refresh(access()) }, modifier = Modifier.fillMaxSize()) {
             when {
+                displayedTab == 3 -> com.vxplayer.music.MusicScreen(musicModel,onSettings)
+                displayedTab == 4 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("More",style = MaterialTheme.typography.headlineLarge)
+                    OutlinedButton(onClick = onSettings) { Text("Settings") }
+                    OutlinedButton(onClick = { context.startActivity(Intent(context,com.vxplayer.privatefiles.PrivateActivity::class.java)) }) { Text("Private") }
+                    com.vxplayer.settings.BackupControls()
+                    com.vxplayer.settings.AboutCard()
+                }
                 !allowed -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
                     FolderIcon()
                     Text("Your video library", style = MaterialTheme.typography.headlineSmall)
@@ -216,10 +226,18 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
             }
         }
     }
+            }
+            com.vxplayer.music.MusicMiniPlayer(musicModel)
+            NavigationBar {
+                listOf(Triple(1,"Videos",Icons.Default.VideoLibrary),Triple(0,"Folders",Icons.Default.Folder),Triple(3,"Music",Icons.Default.LibraryMusic),Triple(2,"Recent",Icons.Default.History),Triple(4,"More",Icons.Default.MoreHoriz)).forEach { (index,label,icon) ->
+                    NavigationBarItem(selected = tab == index,onClick = { tab = index; selectedFolder = null },icon = { Icon(icon,label) },label = { Text(label) },
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary,selectedTextColor = MaterialTheme.colorScheme.primary,indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha=.18f)))
+                }
+            }
 }
 
-        if (tab != 3 && selectedFolder == null && resumeModel.showFab) resumeModel.candidate?.let { video ->
-            Box(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(20.dp)) {
+        if (tab in 0..2 && selectedFolder == null && resumeModel.showFab) resumeModel.candidate?.let { video ->
+            Box(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(start=20.dp,end=20.dp,top=20.dp,bottom=if(musicModel.current!=null)184.dp else 104.dp)) {
                 ResumeFab(video, folderScroll.isScrollInProgress || videosScroll.isScrollInProgress || recentScroll.isScrollInProgress || gridScroll.isScrollInProgress,
                     resumeModel.busy, ::resume, resumeModel::dismissFab)
             }

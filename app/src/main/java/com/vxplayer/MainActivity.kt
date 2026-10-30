@@ -64,6 +64,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.vxplayer.ui.brandSplashExit
 
 class MainActivity : ComponentActivity() {
+    private var openMusicRequested by mutableStateOf(false)
     private var externalVideoUri by mutableStateOf<String?>(null)
     var playerCallbackOwner: Any? = null
     private fun acceptExternalVideo(request: Intent?) {
@@ -85,7 +86,7 @@ class MainActivity : ComponentActivity() {
         }
         externalVideoUri = uri.toString()
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptExternalVideo(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.getBooleanExtra("openMusic",false)) openMusicRequested = true; acceptExternalVideo(intent) }
     var pipMode by mutableStateOf(false)
         private set
     var canEnterPip: () -> Boolean = { false }
@@ -124,12 +125,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) openMusicRequested = intent.getBooleanExtra("openMusic",false)
         if (savedInstanceState == null) acceptExternalVideo(intent)
         brandSplashExit(splash, freshLaunch = savedInstanceState == null)
         enableEdgeToEdge()
         setContent {
             val settings by AppSettings.get(applicationContext).state.collectAsStateWithLifecycle()
             val navigation = rememberNavController()
+            LaunchedEffect(openMusicRequested) { if (openMusicRequested) navigation.popBackStack("library",false) }
             LaunchedEffect(externalVideoUri) {
                 val source = externalVideoUri ?: return@LaunchedEffect
                 val video = withContext(Dispatchers.IO) { com.vxplayer.library.inspectLocalVideo(applicationContext, Uri.parse(source), Uri.parse(source).lastPathSegment ?: "Video") }
@@ -148,7 +151,7 @@ class MainActivity : ComponentActivity() {
                 NavHost(navigation, startDestination = "library", enterTransition = { fadeIn(tween(180)) },
                     exitTransition = { fadeOut(tween(140)) }, popEnterTransition = { fadeIn(tween(180)) }, popExitTransition = { fadeOut(tween(140)) }) {
                     composable("library") {
-                        LibraryScreen(requestOnLaunch = externalVideoUri == null, onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->
+                        LibraryScreen(requestOnLaunch = externalVideoUri == null && !openMusicRequested, openMusic = openMusicRequested,onMusicOpened = {openMusicRequested=false}, onSettings = { navigation.navigate("settings") }, onVideoClick = { video, folder ->
                             navigation.navigate("player?uri=${Uri.encode(video.uri.toString())}&title=${Uri.encode(video.title)}&folder=${Uri.encode(folder)}") {
                                 launchSingleTop = true
                             }

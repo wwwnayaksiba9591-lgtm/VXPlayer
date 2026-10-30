@@ -16,7 +16,8 @@ import kotlinx.coroutines.withContext
 const val NETWORK_LINKS_CREATE = "CREATE TABLE IF NOT EXISTS `network_links` (`url` TEXT NOT NULL, `name` TEXT NOT NULL, `favourite` INTEGER NOT NULL, `lastPlayedAt` INTEGER NOT NULL, `streamType` TEXT NOT NULL, `subtitleUri` TEXT, `subtitleName` TEXT, PRIMARY KEY(`url`))"
 
 private fun importLegacy(db: SupportSQLiteDatabase, prefs: SharedPreferences) {
-    legacyNetworkLinks(prefs.getString("recentStreamUrls", "[]")) { prefs.getString("streamType:$it", "Auto") ?: "Auto" }.forEach {
+    val saved = runCatching { prefs.all }.getOrDefault(emptyMap<String,Any>())
+    legacyNetworkLinks(saved["recentStreamUrls"] as? String) { saved["streamType:$it"] as? String ?: "Auto" }.forEach {
         db.execSQL("INSERT OR IGNORE INTO network_links (url, name, favourite, lastPlayedAt, streamType, subtitleUri, subtitleName) VALUES (?, ?, ?, ?, ?, ?, ?)",
             arrayOf<Any?>(it.url, it.name, 0, it.lastPlayedAt, it.streamType, null, null))
     }
