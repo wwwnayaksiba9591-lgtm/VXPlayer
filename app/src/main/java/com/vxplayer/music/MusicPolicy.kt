@@ -20,6 +20,13 @@ fun <T> removeMusic(items: List<T>, index: Int): List<T> = items.filterIndexed {
 fun <T> shuffledMusic(items: List<T>, first: T?, random: Random = Random.Default): List<T> =
     items.distinct().filter { it != first }.shuffled(random).let { if (first != null && first in items) listOf(first) + it else it }
 fun nextMusicRepeat(mode: Int) = when (mode) { 0 -> 2; 2 -> 1; else -> 0 } // Media3 off/all/one
+fun <T> musicQueueWindow(items: List<T>, index: Int, limit: Int = 5000): Pair<List<T>,Int> {
+    if (items.isEmpty()) return emptyList<T>() to 0
+    val selected = index.coerceIn(items.indices)
+    val count = limit.coerceAtLeast(1)
+    val start = (selected-count/2).coerceIn(0,(items.size-count).coerceAtLeast(0))
+    return items.drop(start).take(count) to (selected-start)
+}
 data class LyricLine(val timeMs: Long, val text: String)
 fun parseLrc(input: String): List<LyricLine> {
     var offset = 0L

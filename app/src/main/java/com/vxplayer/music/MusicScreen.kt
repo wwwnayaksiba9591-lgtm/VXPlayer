@@ -306,6 +306,8 @@ fun MusicOverlays(model: MusicViewModel) {
                 SongArt(song,Modifier.widthIn(max=360.dp).fillMaxWidth().aspectRatio(1f))
                 Text(song?.title ?: "Nothing queued",style=MaterialTheme.typography.headlineSmall,maxLines=2,overflow=TextOverflow.Ellipsis)
                 Text(song?.artist.orEmpty(),style=MaterialTheme.typography.titleMedium)
+                model.message?.let { message -> Text(message,color=MaterialTheme.colorScheme.error) }
+                if (model.controller?.playerError != null) TextButton(onClick=model::toggle) { Text("Retry") }
                 VXIconButton(if(stats.any {it.uri==song?.uri&&it.favourite})Icons.Default.Favorite else Icons.Default.FavoriteBorder,"Favourite",{song?.let(model::favourite)})
                 MusicSeekBar(model)
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceEvenly) {

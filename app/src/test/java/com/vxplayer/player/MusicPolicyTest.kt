@@ -5,6 +5,13 @@ import org.junit.Test
 import kotlin.random.Random
 
 class MusicPolicyTest {
+    @Test fun largeQueueKeepsSelectedTrackAtAValidWindowIndex() {
+        val (queue,index)=musicQueueWindow((0..9999).toList(),9999)
+        assertEquals(5000,queue.size);assertEquals(9999,queue[index])
+        val (small,first)=musicQueueWindow(listOf("a","b"),-1)
+        assertEquals(listOf("a","b"),small);assertEquals(0,first)
+        assertEquals(emptyList<String>() to 0,musicQueueWindow(emptyList<String>(),0))
+    }
     @Test fun queueInsertRemoveReorderAndEmptyAreSafe() {
         val queue=listOf("a","b","c")
         assertEquals(listOf("a","x","b","c"),insertMusic(queue,0,"x",true))

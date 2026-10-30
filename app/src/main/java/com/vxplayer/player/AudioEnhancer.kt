@@ -35,7 +35,7 @@ class AudioEnhancer(context: Context) {
     fun blockEffects(value: Boolean) { blocked = value; if (value) release() }
     var smartAvailable by mutableStateOf(false)
         private set
-    private var desiredOnAttach = 100
+    private var desiredOnAttach = systemPercent()
     var percent by mutableIntStateOf(systemPercent())
         private set
     var boostAvailable by mutableStateOf(false)

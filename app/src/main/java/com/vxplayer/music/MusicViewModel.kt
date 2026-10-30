@@ -84,7 +84,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val player = controller ?: run { message = "Music controls are connecting. Try again."; return }
         val selected = if (shuffled) shuffledMusic(list,song) else list.distinctBy { it.uri }
         if (selected.isEmpty()) return
-        player.setMediaItems(selected.take(5000).map { it.mediaItem() },selected.indexOfFirst { it.uri == song.uri }.coerceAtLeast(0),0)
+        val (window,index) = musicQueueWindow(selected,selected.indexOfFirst { it.uri == song.uri })
+        if (selected.size > window.size) message = "Queue contains up to 5,000 tracks around your selection."
+        player.setMediaItems(window.map { it.mediaItem() },index,0)
         player.shuffleModeEnabled = shuffled; player.prepare(); player.play(); nowPlaying = true; sync()
     }
     fun toggle() { controller?.let { if (it.playWhenReady) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
