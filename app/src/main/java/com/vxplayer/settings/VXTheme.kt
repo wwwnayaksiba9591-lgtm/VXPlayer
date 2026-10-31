@@ -36,11 +36,11 @@ val VXDarkColors = darkColorScheme(
     secondaryContainer = Color(0xFF394B60), onSecondaryContainer = Color(0xFFD8E5F6),
     tertiary = Color(0xFFA5CDDA), onTertiary = Color(0xFF073540),
     tertiaryContainer = Color(0xFF254D59), onTertiaryContainer = Color(0xFFC0E9F7),
-    background = Color(0xFF101720), onBackground = Color(0xFFE3EAF4),
-    surface = Color(0xFF101720), onSurface = Color(0xFFE3EAF4),
+    background = Color(0xFF080A10), onBackground = Color(0xFFE3EAF4),
+    surface = Color(0xFF080A10), onSurface = Color(0xFFE3EAF4),
     surfaceVariant = Color(0xFF293543), onSurfaceVariant = Color(0xFFC0CBD8),
-    surfaceContainerLowest = Color(0xFF0B1119), surfaceContainerLow = Color(0xFF17212D),
-    surfaceContainer = Color(0xFF1B2633), surfaceContainerHigh = Color(0xFF263240), surfaceContainerHighest = Color(0xFF313E4D),
+    surfaceContainerLowest = Color(0xFF050609), surfaceContainerLow = Color(0xFF11141D),
+    surfaceContainer = Color(0xFF181C28), surfaceContainerHigh = Color(0xFF222737), surfaceContainerHighest = Color(0xFF2C3244),
     inverseSurface = Color(0xFFE3EAF4), inverseOnSurface = Color(0xFF293340), inversePrimary = Color(0xFF145DA0),
     outline = Color(0xFF8A97A8), outlineVariant = Color(0xFF404D5D),
     error = Color(0xFFFFB4AB), onError = Color(0xFF690005), errorContainer = Color(0xFF93000A), onErrorContainer = Color(0xFFFFDAD6),
@@ -71,6 +71,9 @@ fun VXTheme(settings: PlaybackDefaults, playerMode: Boolean = false, content: @C
         "Purple" -> if (dark) Color(0xFFD6BAFF) else Color(0xFF7041A0)
         else -> if (dark) Color(0xFFFFB787) else Color(0xFF954900)
     }
-    val colors = if (settings.dynamicColor && Build.VERSION.SDK_INT >= 31) baseColors else baseColors.copy(primary = tone, onPrimary = if (dark) Color.Black else Color.White, surfaceTint = tone)
+    val branded = if (settings.dynamicColor && Build.VERSION.SDK_INT >= 31) baseColors else baseColors.copy(primary = tone, onPrimary = if (dark) Color.Black else Color.White, surfaceTint = tone)
+    val colors = if (settings.theme == "AMOLED" && !playerMode) branded.copy(background=Color.Black,surface=Color.Black) else branded
+    CompositionLocalProvider(com.vxplayer.ui.LocalVXHaptics provides settings.haptics) {
     MaterialTheme(colorScheme = colors, typography = VXTypography, shapes = VXShapes, content = content)
+    }
 }

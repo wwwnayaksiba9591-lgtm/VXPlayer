@@ -48,7 +48,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 val mode=com.vxplayer.player.RotationMode.parse(label)
                 context.getSharedPreferences("vxplayer",0).edit().putString("rotationMode",mode.name).putBoolean("rotationLocked",false).putInt("rotationRequested",mode.orientation).apply()
             }
-            SettingChoice("Theme", settings.theme, listOf("System", "Light", "Dark")) { label -> store.update { it.copy(theme = label) } }
+            SettingChoice("Theme", settings.theme, listOf("Dark", "AMOLED", "Light", "System")) { label -> store.update { it.copy(theme = label) } }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Touch feedback",Modifier.weight(1f))
+                Switch(settings.haptics,{ checked -> store.update {it.copy(haptics=checked)} })
+            }
             val webPrefs=remember {context.getSharedPreferences("vxplayer",0)}
             var blockWeb by remember {mutableStateOf(webPrefs.all["webShield"] as? Boolean ?: true)}
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {

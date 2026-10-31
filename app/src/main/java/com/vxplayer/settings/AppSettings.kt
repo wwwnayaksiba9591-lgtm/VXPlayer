@@ -6,11 +6,12 @@ import com.vxplayer.player.PlaybackMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+@androidx.compose.runtime.Immutable
 data class PlaybackDefaults(val speed: Float = 1f, val autoNext: Boolean = true, val aspect: Int = 0,
-    val orientation: String = "Auto", val theme: String = "System", val dynamicColor: Boolean = false,
+    val orientation: String = "Auto", val theme: String = "AMOLED", val dynamicColor: Boolean = false,
     val allowBoost: Boolean = true, val maxBoost: Int = 200, val rememberBoost: Boolean = false, val rememberEnhance: Boolean = true,
     val seekSensitivity: SeekSensitivity = SeekSensitivity.Medium, val playbackMode: PlaybackMode = PlaybackMode.Off,
-    val accent: String = "Orange")
+    val haptics: Boolean = true, val accent: String = "Blue")
 
 class AppSettings private constructor(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("vxplayer", 0)
@@ -24,7 +25,7 @@ class AppSettings private constructor(context: Context) {
             .putString("defaultOrientation", value.orientation).putString("theme", value.theme).putBoolean("dynamicColor", value.dynamicColor)
             .putBoolean("allowBoost", value.allowBoost).putInt("maxBoost", value.maxBoost).putBoolean("rememberBoost", value.rememberBoost)
             .putBoolean("rememberEnhance", value.rememberEnhance).putString("seekSensitivity", value.seekSensitivity.name)
-            .putString("playbackMode", value.playbackMode.name).putString("accent", value.accent).apply()
+            .putBoolean("haptics",value.haptics).putString("playbackMode", value.playbackMode.name).putString("accent", value.accent).apply()
         mutable.value = value
     }
     companion object {
