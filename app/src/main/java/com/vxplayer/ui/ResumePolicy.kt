@@ -10,3 +10,8 @@ fun selectResumeVideo(recent: List<ResumeVideo>): ResumeVideo? {
     return eligible.firstOrNull { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs) }
         ?: eligible.firstOrNull()
 }
+
+/** Folder shortcuts never restart an already finished or untouched video. */
+fun selectFolderResumeVideo(videos: List<ResumeVideo>): ResumeVideo? = videos
+    .filter { it.accessible && !it.privateVideo && it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs) }
+    .maxByOrNull { it.playedAt }

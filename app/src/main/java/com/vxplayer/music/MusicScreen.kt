@@ -48,18 +48,18 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
-private fun musicArtwork(song: Song?): State<MusicArtwork?> {
+internal fun musicArtwork(song: Song?): State<MusicArtwork?> {
     val context = LocalContext.current
     return produceState<MusicArtwork?>(null,song?.uri) {
         value = song?.let { withContext(Dispatchers.IO) { MusicArt.load(context,it) } }
     }
 }
 @Composable
-fun SongArt(song: Song?, modifier: Modifier = Modifier, circle: Boolean = false) {
+fun SongArt(song: Song?, modifier: Modifier = Modifier, circle: Boolean = false, scale: ContentScale = ContentScale.Crop) {
     val art by musicArtwork(song)
     val background = art?.let { Color(it.color) } ?: MaterialTheme.colorScheme.primaryContainer
     Box(modifier.clip(if (circle) CircleShape else RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(background,background.copy(alpha=.4f)))),contentAlignment = Alignment.Center) {
-        art?.bitmap?.let { Image(it.asImageBitmap(),null,Modifier.fillMaxSize(),contentScale = ContentScale.Crop) }
+        art?.bitmap?.let { Image(it.asImageBitmap(),null,Modifier.fillMaxSize(),contentScale = scale) }
             ?: Icon(Icons.Default.MusicNote,null,Modifier.fillMaxSize(.45f),tint = Color.White)
     }
 }
@@ -80,16 +80,16 @@ fun MusicScreen(model: MusicViewModel, onSettings: () -> Unit) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var allowed by remember { mutableStateOf(model.allowed()) }
     var asked by rememberSaveable { mutableStateOf(false) }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = it; if (it) model.refresh() }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = it; model.refresh() }
     LaunchedEffect(Unit) { if (allowed) model.refresh() else if (!asked) { asked = true; permission.launch(model.permission) } }
     DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _,event -> if (event == Lifecycle.Event.ON_RESUME) { allowed = model.allowed(); if (allowed) model.refresh() } }
+        val observer = LifecycleEventObserver { _,event -> if (event == Lifecycle.Event.ON_RESUME) { allowed = model.allowed(); model.refresh() } }
         lifecycle.addObserver(observer); onDispose { lifecycle.removeObserver(observer) }
     }
     val stats by model.stats.collectAsStateWithLifecycle()
     val playlists by model.playlists.collectAsStateWithLifecycle()
     val entries by model.playlistItems.collectAsStateWithLifecycle()
-    var section by rememberSaveable { mutableStateOf("Home") }
+    var section by rememberSaveable { mutableStateOf("Songs") }
     var query by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -101,8 +101,12 @@ fun MusicScreen(model: MusicViewModel, onSettings: () -> Unit) {
     var addSong by remember { mutableStateOf<Song?>(null) }
     var info by remember { mutableStateOf<Song?>(null) }
     val favourites = stats.filter { it.favourite }.map { it.uri }.toSet()
-    val songs = sortSongs(model.songs.filter { query.isBlank() || listOf(it.title,it.artist,it.album).any { field -> field.contains(query,true) } },model.sort)
-    val detailTitle = detail?.let { selected -> if (section == "Artists") selected else model.songs.firstOrNull { "${it.volume}:${it.albumId}:${it.album}" == selected }?.album }
+    val songs by produceState(model.songs,model.songs,query,model.sort) { value = withContext(Dispatchers.Default) { sortSongs(model.songs.filter { query.isBlank() || listOf(it.title,it.artist,it.album).any { field -> field.contains(query,true) } },model.sort) } }
+    val detailTitle = detail?.let { selected -> when(section) {
+        "Artists" -> selected
+        "Folders" -> songs.firstOrNull { it.folderKey()==selected }?.folderLabel()
+        else -> model.songs.firstOrNull { "${it.volume}:${it.albumId}:${it.album}" == selected }?.album
+    } }
     fun share(song: Song) { shareSong(context,song) }
     BackHandler(detail != null || playlistId != null) { detail = null; playlistId = null }
     Column(Modifier.fillMaxSize()) {
@@ -114,7 +118,7 @@ fun MusicScreen(model: MusicViewModel, onSettings: () -> Unit) {
                 VXIconButton(Icons.Default.MoreVert,"Music menu",{ menu = true })
                 DropdownMenu(menu,{ menu = false }) {
                     DropdownMenuItem(text={Text("Sort")},onClick={menu=false;sortMenu=true})
-                    DropdownMenuItem(text={Text("Refresh")},onClick={menu=false;model.refresh()})
+                    DropdownMenuItem(text={Text("Rescan")},onClick={menu=false;model.refresh()})
                     DropdownMenuItem(text={Text("Equalizer")},onClick={menu=false;model.showEqualizer=true})
                     DropdownMenuItem(text={Text("Sleep timer")},onClick={menu=false;model.showSleep=true})
                     DropdownMenuItem(text={Text("Settings")},onClick={menu=false;onSettings()})
@@ -123,16 +127,17 @@ fun MusicScreen(model: MusicViewModel, onSettings: () -> Unit) {
             }
         }
         if (search) OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp),singleLine=true,label={Text("Search songs, albums, artists")})
+        Text("${model.songs.size} audio tracks${if(query.isNotBlank()) " · ${songs.size} matches" else ""}",Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodyMedium)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Home","Songs","Albums","Artists","Playlists").forEach { value -> FilterChip(section==value,{section=value;detail=null;playlistId=null},label={Text(value)}) }
+            listOf("Songs","Albums","Artists","Folders","Playlists").forEach { value -> FilterChip(section==value,{section=value;detail=null;playlistId=null},label={Text(value)}) }
         }
         model.message?.let { Text(it,Modifier.padding(16.dp),color=MaterialTheme.colorScheme.error) }
         when {
-            !allowed -> Column(Modifier.fillMaxWidth().padding(32.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            !allowed -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(32.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.LibraryMusic,null,Modifier.size(64.dp)); Text("Your music library",style=MaterialTheme.typography.titleLarge)
                 Text("Plays music stored on your device.")
                 Text("Allow audio access to browse your songs. If access is limited by your device or work profile, only available tracks appear.")
-                Button(onClick={permission.launch(model.permission)}) {Text("Allow music")}
+                Button(onClick={permission.launch(model.permission)}) {Text("Grant access")}
                 TextButton(onClick={context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}")))}) {Text("App settings")}
             }
             model.loading && model.songs.isEmpty() -> Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) { CircularProgressIndicator() }
@@ -142,20 +147,20 @@ fun MusicScreen(model: MusicViewModel, onSettings: () -> Unit) {
                     playlistId != null -> entries.filter { it.playlistId == playlistId }.mapNotNull { entry -> songs.firstOrNull { it.uri == entry.uri } }
                     detail != null && section == "Albums" -> songs.filter { "${it.volume}:${it.albumId}:${it.album}" == detail }
                     detail != null && section == "Artists" -> songs.filter { it.artist == detail }
+                    detail != null && section == "Folders" -> songs.filter { it.folderKey() == detail }
                     else -> songs
                 }
                 if (songs.isEmpty()) Column(Modifier.fillMaxWidth().padding(32.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Default.MusicNote,null,Modifier.size(64.dp)); Text("No music found",style=MaterialTheme.typography.titleLarge)
-                    Text("Plays music stored on your device."); Text("Add audio files to Music, then refresh. Ringtones, alarms and recordings are excluded.")
-                    Row(verticalAlignment=Alignment.CenterVertically) { Text("Hide tracks shorter than 30 s",Modifier.weight(1f)); Switch(model.hideShort,{model.changeHideShort(it)}) }
+                    Text("Plays music stored on your device."); Text("All accessible audio is included, including recordings and voice notes. Add files or grant audio access, then rescan. Android may hide private or unindexed files.")
                     OutlinedButton(onClick={model.refresh()}) {Text("Refresh")}
                 } else if (detail != null || playlistId != null || section == "Songs") {
                     val art by musicArtwork(selected.firstOrNull())
-                    LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    FastMusicList {
                         if (detail != null || playlistId != null) item {
                             Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color(art?.color ?: 0xFF293543.toInt()).copy(alpha=.5f),Color.Transparent))).padding(16.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                                 SongArt(selected.firstOrNull(),Modifier.size(180.dp),section=="Artists")
-                                Text(if (playlistId != null) playlists.firstOrNull { it.id==playlistId }?.name ?: "Favourites" else selected.firstOrNull()?.let { if(section=="Artists")it.artist else it.album }.orEmpty(),style=MaterialTheme.typography.headlineSmall)
+                                Text(if (playlistId != null) playlists.firstOrNull { it.id==playlistId }?.name ?: "Favourites" else detailTitle.orEmpty(),style=MaterialTheme.typography.headlineSmall)
                                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                     Button(onClick={selected.firstOrNull()?.let {model.play(it,selected)}},enabled=selected.isNotEmpty()){Text("Play")}
                                     OutlinedButton(onClick={selected.randomOrNull()?.let {model.play(it,selected,true)}},enabled=selected.isNotEmpty()){Text("Shuffle")}
@@ -193,12 +198,14 @@ fun MusicScreen(model: MusicViewModel, onSettings: () -> Unit) {
                             } }
                         }
                     }
-                    "Albums","Artists" -> {
-                        val groups=songs.groupBy {if(section=="Artists")it.artist else "${it.volume}:${it.albumId}:${it.album}"}
+                    "Albums","Artists","Folders" -> {
+                        val groups by produceState<Map<String,List<Song>>>(emptyMap(),songs,section) {
+                            value=withContext(Dispatchers.Default) { songs.groupBy { when(section) {"Artists"->it.artist;"Folders"->it.folderKey();else->"${it.volume}:${it.albumId}:${it.album}"} } }
+                        }
                         LazyVerticalGrid(GridCells.Fixed(2),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
                             items(groups.keys.toList(),key={it}) { key -> val group=groups.getValue(key); Column(Modifier.clickable {detail=key}) {
                                 SongArt(group.first(),Modifier.fillMaxWidth().aspectRatio(1f),section=="Artists")
-                                Text(if(section=="Artists")group.first().artist else group.first().album,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                Text(when(section){"Artists"->group.first().artist;"Folders"->group.first().folderLabel();else->group.first().album},maxLines=1,overflow=TextOverflow.Ellipsis)
                                 Text("${group.size} songs",style=MaterialTheme.typography.bodySmall)
                             } }
                         }
@@ -281,49 +288,17 @@ fun MusicMiniPlayer(model: MusicViewModel) {
 @Composable
 fun MusicOverlays(model: MusicViewModel) {
     val context = LocalContext.current
-    var nowMenu by remember { mutableStateOf(false) }
-    var info by remember { mutableStateOf(false) }
-    val stats by model.stats.collectAsStateWithLifecycle()
-    if(model.nowPlaying) Dialog(onDismissRequest={model.nowPlaying=false},properties=DialogProperties(usePlatformDefaultWidth=false)) {
-        var shown by remember {mutableStateOf(false)};LaunchedEffect(Unit){shown=true}
-        AnimatedVisibility(shown,enter=slideInVertically {it}) {
-            val song=model.current
-            val art by musicArtwork(song)
-            val shade by animateColorAsState(Color(art?.color ?: 0xFF293543.toInt()),label="Album background")
-            Surface(Modifier.fillMaxSize()) {Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(shade.copy(alpha=.5f),Color.Transparent))).safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(16.dp)) {
-                var drag by remember {mutableFloatStateOf(0f)}
-                Row(Modifier.fillMaxWidth().pointerInput(Unit){detectVerticalDragGestures(onDragEnd={if(drag>70)model.nowPlaying=false}){change,amount->change.consume();drag+=amount}},verticalAlignment=Alignment.CenterVertically) {
-                    VXIconButton(Icons.Default.KeyboardArrowDown,"Collapse",{model.nowPlaying=false});Text("Now playing",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
-                    VXIconButton(Icons.Default.QueueMusic,"Queue",{model.showQueue=true})
-                    Box {
-                        VXIconButton(Icons.Default.MoreVert,"Now playing menu",{nowMenu=true})
-                        DropdownMenu(nowMenu,{nowMenu=false}) {
-                            DropdownMenuItem(text={Text("Share track")},onClick={nowMenu=false;song?.let {shareSong(context,it)}})
-                            DropdownMenuItem(text={Text("Track info")},onClick={nowMenu=false;info=true})
-                        }
-                    }
-                }
-                SongArt(song,Modifier.widthIn(max=360.dp).fillMaxWidth().aspectRatio(1f))
-                Text(song?.title ?: "Nothing queued",style=MaterialTheme.typography.headlineSmall,maxLines=2,overflow=TextOverflow.Ellipsis)
-                Text(song?.artist.orEmpty(),style=MaterialTheme.typography.titleMedium)
-                model.message?.let { message -> Text(message,color=MaterialTheme.colorScheme.error) }
-                if (model.controller?.playerError != null) TextButton(onClick=model::toggle) { Text("Retry") }
-                VXIconButton(if(stats.any {it.uri==song?.uri&&it.favourite})Icons.Default.Favorite else Icons.Default.FavoriteBorder,"Favourite",{song?.let(model::favourite)})
-                MusicSeekBar(model)
-                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceEvenly) {
-                    IconToggleButton(model.shuffle,{model.shuffleToggle()}){Icon(Icons.Default.Shuffle,"Shuffle")}
-                    VXIconButton(Icons.Default.SkipPrevious,"Previous",model::previous)
-                    FilledIconButton(model::toggle,Modifier.size(76.dp)){Icon(if(model.playing)Icons.Default.Pause else Icons.Default.PlayArrow,"Play or pause",Modifier.size(42.dp))}
-                    VXIconButton(Icons.Default.SkipNext,"Next",model::next)
-                    IconButton(model::repeatToggle){Icon(if(model.repeat==1)Icons.Default.RepeatOne else Icons.Default.Repeat,"Repeat: ${when(model.repeat){1->"one";2->"all";else->"off"}}",tint=if(model.repeat==0)MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)}
-                }
-                Row {
-                    TextButton({model.showSleep=true}){Text("Sleep timer")};TextButton({model.showEqualizer=true}){Text("Equalizer")}
-                }
-                MusicLyrics(model,song)
-            } }
+    var askedNotifications by rememberSaveable {mutableStateOf(false)}
+    val notifications=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(model.playing) {
+        if(model.playing && !askedNotifications && android.os.Build.VERSION.SDK_INT>=33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            askedNotifications=true
+            notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+    var info by remember { mutableStateOf(false) }
+    val stats by model.stats.collectAsStateWithLifecycle()
+    if(model.nowPlaying) MusicPlayerOverlay(model,stats,onInfo={info=true},onShare={model.current?.let {shareSong(context,it)}},lyrics={MusicLyrics(model,model.current)})
     if(model.showQueue) MusicQueueDialog(model){model.showQueue=false}
     if(info) AlertDialog(onDismissRequest={info=false},title={Text(model.current?.title ?: "Track info")},text={Text("${model.current?.artist.orEmpty()}\n${model.current?.album.orEmpty()}\n${formatDuration(model.controller?.duration?.takeIf {it>0} ?: 0)}")},confirmButton={TextButton(onClick={info=false}){Text("Close")}})
     if(model.showEqualizer) {
@@ -355,12 +330,37 @@ private fun shareSong(context: android.content.Context,song: Song) {
     }
 }
 
-@Composable private fun MusicSeekBar(model: MusicViewModel) {
+@Composable internal fun MusicSeekBar(model: MusicViewModel, touch: ()->Unit, dragging: (Boolean)->Unit) {
     val position by musicPosition(model)
     var preview by remember {mutableStateOf<Float?>(null)}
     val duration=model.controller?.duration?.takeIf {it>0} ?: 0
-    Column {Slider(preview ?: position.coerceIn(0,duration.coerceAtLeast(1)).toFloat(),{preview=it},onValueChangeFinished={preview?.let {model.controller?.seekTo(it.toLong())};preview=null},valueRange=0f..duration.coerceAtLeast(1).toFloat(),enabled=duration>0)
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(formatDuration(preview?.toLong() ?: position));Text(formatDuration(duration))}}
+    DisposableEffect(Unit){onDispose {dragging(false)}}
+    Column(Modifier.fillMaxWidth()) {
+        Slider(preview ?: position.coerceIn(0,duration.coerceAtLeast(1)).toFloat(),{preview=it;dragging(true);touch()},onValueChangeFinished={preview?.let {model.controller?.seekTo(it.toLong())};preview=null;dragging(false);touch()},valueRange=0f..duration.coerceAtLeast(1).toFloat(),enabled=duration>0,
+            colors=SliderDefaults.colors(thumbColor=Color.White,activeTrackColor=Color.White),modifier=Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+            Text(formatDuration(preview?.toLong() ?: position),color=Color.White,style=MaterialTheme.typography.labelMedium)
+            Text(if(duration>0)formatDuration(duration) else "--:--",color=Color.White,style=MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable private fun FastMusicList(content: LazyListScope.()->Unit) {
+    val state=rememberLazyListState()
+    val scope=rememberCoroutineScope()
+    val total by remember {derivedStateOf {state.layoutInfo.totalItemsCount}}
+    val visible by remember {derivedStateOf {state.layoutInfo.visibleItemsInfo.size}}
+    val fraction by remember {derivedStateOf {if(total>visible)state.firstVisibleItemIndex.toFloat()/(total-visible) else 0f}}
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(),state=state,contentPadding=PaddingValues(start=16.dp,top=16.dp,end=32.dp,bottom=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp),content=content)
+        if(total>visible)BoxWithConstraints(Modifier.align(Alignment.CenterEnd).width(32.dp).fillMaxHeight().pointerInput(total) {
+            fun scroll(y: Float) { scope.launch { state.scrollToItem((y/size.height.coerceAtLeast(1)*total).toInt().coerceIn(0,(total-1).coerceAtLeast(0))) } }
+            detectVerticalDragGestures(onDragStart={scroll(it.y)}) { change,_->change.consume();scroll(change.position.y) }
+        }) {
+            Box(Modifier.align(Alignment.TopEnd).padding(end=4.dp).offset(y=(maxHeight-56.dp).coerceAtLeast(0.dp)*fraction.coerceIn(0f,1f))
+                .width(4.dp).height(56.dp).background(MaterialTheme.colorScheme.primary,RoundedCornerShape(4.dp)))
+        }
+    }
 }
 @Composable private fun MusicLyrics(model: MusicViewModel,song: Song?) {
     val context=LocalContext.current
@@ -375,10 +375,10 @@ private fun shareSong(context: android.content.Context,song: Song) {
     Dialog(close,properties=DialogProperties(usePlatformDefaultWidth=false)) {Surface(Modifier.fillMaxSize()){Column(Modifier.safeDrawingPadding()){
         Row(verticalAlignment=Alignment.CenterVertically){VXIconButton(Icons.AutoMirrored.Filled.ArrowBack,"Back",close);Text("Queue",Modifier.weight(1f),style=MaterialTheme.typography.titleLarge);TextButton(onClick=model::clearQueue){Text("Clear")}}
         LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(12.dp)) {
-            itemsIndexed(model.queue,key={i,s->"$i:${s.uri}"}){index,song->
+            itemsIndexed(model.queue,key={i,s->model.queueKeys.getOrNull(i) ?: "$i:${s.uri}"}){index,song->
                 val dismiss=rememberSwipeToDismissBoxState(confirmValueChange={if(it!=SwipeToDismissBoxValue.Settled){model.remove(index);true}else false})
                 SwipeToDismissBox(dismiss,backgroundContent={Box(Modifier.fillMaxSize(),contentAlignment=Alignment.CenterEnd){Icon(Icons.Default.Delete,null)}}){
-                    SongRow(song,model.current?.uri==song.uri&&model.playing,stats.any {it.uri==song.uri&&it.favourite},play={model.seekQueue(index)},next={val current=model.controller?.currentMediaItemIndex ?: 0;model.move(index,if(index<current)current else (current+1).coerceAtMost(model.queue.lastIndex))},add={model.add(song,false)},favouriteAction={model.favourite(song)},playlist={},share={},info={},handle={to->model.move(index,to)},index=index,count=model.queue.size,remove={model.remove(index)},queueOnly=true)
+                    SongRow(song,model.controller?.currentMediaItemIndex==index&&model.playing,stats.any {it.uri==song.uri&&it.favourite},play={model.seekQueue(index)},next={val current=model.controller?.currentMediaItemIndex ?: 0;model.move(index,if(index<current)current else (current+1).coerceAtMost(model.queue.lastIndex))},add={model.add(song,false)},favouriteAction={model.favourite(song)},playlist={},share={},info={},handle={to->model.move(index,to)},index=index,count=model.queue.size,remove={model.remove(index)},queueOnly=true)
                 }
             }
             item{Text("Played tracks",style=MaterialTheme.typography.titleLarge,modifier=Modifier.padding(16.dp))}

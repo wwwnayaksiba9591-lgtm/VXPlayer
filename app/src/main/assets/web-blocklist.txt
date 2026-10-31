@@ -1,0 +1,15 @@
+# One hostname per line; subdomains are matched too. Best effort, not a full browser blocker.
+doubleclick.net
+googlesyndication.com
+googleadservices.com
+google-analytics.com
+googletagmanager.com
+adnxs.com
+popads.net
+popcash.net
+adsterra.com
+exoclick.com
+outbrain.com
+taboola.com
+monetag.com
+onclicka.com

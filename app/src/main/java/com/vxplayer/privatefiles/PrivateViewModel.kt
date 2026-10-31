@@ -36,9 +36,16 @@ class PrivateViewModel(application: Application, private val saved: SavedStateHa
     fun consumeConsent() { consent = null }
     fun consumePendingFinish() { pendingFinishId = null }
     fun clearMessage() { message = null }
+    fun consentLaunchFailed() {
+        val id = saved.remove<String>("consentEntry")
+        runWork {
+            if (id != null) repository.cancelDeletionRequest(id)
+            "Could not open Android’s deletion confirmation. Original and private copy are kept. Tap Finish move to retry."
+        }
+    }
     fun refresh() {
         if (!busy) viewModelScope.launch {
-            try { entries = repository.entries() }
+            try { entries = repository.entries();if(repository.unreadableRecords>0)message="Some private index records could not be read. Files are kept; intact videos are shown." }
             catch (_: Exception) { message = "Could not read the private index. Files have been kept." }
         }
     }
@@ -69,6 +76,10 @@ class PrivateViewModel(application: Application, private val saved: SavedStateHa
             pendingFinishId = entry.id
             "Private copy verified. Tap Finish move for ${entry.title} to remove the gallery original."
         }
+    }
+    fun retryMove(source: Uri?,title: String,size: Long) {
+        if(busy || source==null || entries.any {it.originalUri==source.toString()})return
+        saved["moveStarted"]=false;beginMove(source,title,size)
     }
 
     fun finishMove(entry: PrivateEntry, granted: Boolean = false) = runWork {

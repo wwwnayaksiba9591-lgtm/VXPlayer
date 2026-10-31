@@ -30,7 +30,7 @@ fun playbackModeIcon(mode: PlaybackMode) = when (mode) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit, onSpeed: () -> Unit,
-    onOrientation: () -> Unit, orientationLocked: Boolean) {
+    onOrientation: () -> Unit, orientationLocked: Boolean, onCustomise: () -> Unit = {}) {
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -42,9 +42,22 @@ fun PlayerExtraMenu(model: PlayerViewModel, show: Boolean, onDismiss: () -> Unit
     if (audioSheet) AudioEnhanceSheet(model) { audioSheet = false }
     if (enhanceSheet) EnhanceSheet(model) { enhanceSheet = false }
     if (dialog == "report") PlaybackProblemDialog(model.problemReport()) { dialog = null }
+    if(show && model.casting) {
+        ModalBottomSheet(onDismissRequest=onDismiss) {
+            Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                Text("Playing on Cast receiver",style=MaterialTheme.typography.titleLarge)
+                Text("Play, pause and seek control the receiver. Phone effects, local subtitles, screenshots and folder modes apply to phone playback. Use the Cast button to disconnect and return to your saved position.")
+                TextButton(onClick={runCatching {context.startActivity(android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS))}}){Text("Cast screen")}
+                TextButton(onClick=onDismiss){Text("Close")}
+            }
+        }
+        return
+    }
     if (show) ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
     Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+    DropdownMenuItem(text={Text("Cast screen")},onClick={runCatching {context.startActivity(android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS))}.onFailure {message="Screen casting settings are unavailable on this device."}})
+    DropdownMenuItem(text = { Text("Customise quick actions") }, onClick = { onDismiss(); onCustomise() })
     DropdownMenuItem(text = { Text("Media info / Playback problem report") }, onClick = { dialog = "report" })
     DropdownMenuItem(text = { Text("Speed · ${model.speed}×") }, onClick = onSpeed)
     DropdownMenuItem(text = { Text("Folder playback · ${model.playbackMode.label}") },

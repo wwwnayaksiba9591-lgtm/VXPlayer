@@ -63,11 +63,29 @@ import java.util.Locale
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.vxplayer.ui.brandSplashExit
 
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var openMusicRequested by mutableStateOf(false)
+    private var backgroundResumeRequested by mutableStateOf(false)
     private var externalVideoUri by mutableStateOf<String?>(null)
+    private var externalStreamUri by mutableStateOf<String?>(null)
     var playerCallbackOwner: Any? = null
     private fun acceptExternalVideo(request: Intent?) {
+        val networkInput=when(request?.action) {
+            Intent.ACTION_SEND->request.getStringExtra(Intent.EXTRA_TEXT)
+            Intent.ACTION_VIEW->request.data?.takeIf {it.scheme in listOf("http","https")}?.toString()
+            else->null
+        }
+        if(networkInput!=null) {
+            val url=runCatching {com.vxplayer.library.StreamUrls.normalize(networkInput)}.getOrNull() ?: return
+            if(request?.getBooleanExtra("nativeMedia",false)==true || com.vxplayer.library.StreamUrls.directMedia(url)) {
+                val prefs=getSharedPreferences("vxplayer",0)
+                prefs.edit().putString("streamType:$url","Auto")
+                    .putString("mediaReferer:$url",request?.getStringExtra("mediaReferer")?.take(4096))
+                    .putString("mediaUserAgent:$url",request?.getStringExtra("mediaUserAgent")?.take(512)).apply()
+                externalStreamUri=url
+            } else com.vxplayer.web.WebPlayerActivity.open(this,url)
+            return
+        }
         if (request?.action != Intent.ACTION_VIEW) return
         val uri = request.data ?: return
         if (uri.scheme !in listOf("content", "file")) return
@@ -86,7 +104,7 @@ class MainActivity : ComponentActivity() {
         }
         externalVideoUri = uri.toString()
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.getBooleanExtra("openMusic",false)) openMusicRequested = true; acceptExternalVideo(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (intent.getBooleanExtra("openMusic",false)) openMusicRequested = true; if(intent.getBooleanExtra("openBackgroundVideo",false))backgroundResumeRequested=true; acceptExternalVideo(intent) }
     var pipMode by mutableStateOf(false)
         private set
     var canEnterPip: () -> Boolean = { false }
@@ -120,19 +138,36 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         // Visible PiP is STARTED. STOPPED means even the PiP surface is no longer visible.
         releaseHiddenPlayer()
+        com.vxplayer.music.MusicPlaybackService.instance?.appHidden()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) openMusicRequested = intent.getBooleanExtra("openMusic",false)
+        if(savedInstanceState==null)backgroundResumeRequested=intent.getBooleanExtra("openBackgroundVideo",false)
         if (savedInstanceState == null) acceptExternalVideo(intent)
         brandSplashExit(splash, freshLaunch = savedInstanceState == null)
         enableEdgeToEdge()
         setContent {
             val settings by AppSettings.get(applicationContext).state.collectAsStateWithLifecycle()
             val navigation = rememberNavController()
+            LaunchedEffect(externalStreamUri) {
+                externalStreamUri?.let {source ->externalStreamUri=null
+                    navigation.navigate("player?uri=${Uri.encode(source)}&title=${Uri.encode(com.vxplayer.library.StreamUrls.title(source))}&folder=") {launchSingleTop=true}
+                }
+            }
             LaunchedEffect(openMusicRequested) { if (openMusicRequested) navigation.popBackStack("library",false) }
+            LaunchedEffect(backgroundResumeRequested) {
+                if(backgroundResumeRequested) {
+                    backgroundResumeRequested=false
+                    val video=com.vxplayer.music.VideoSessionHandoff.currentVideo()
+                    if(video!=null && navigation.currentBackStackEntry?.arguments?.getString("uri")!=video.first) {
+                        com.vxplayer.music.VideoSessionHandoff.saveCheckpoint()
+                        navigation.navigate("player?uri=${Uri.encode(video.first)}&title=${Uri.encode(video.second)}&folder=") { launchSingleTop=true }
+                    }
+                }
+            }
             LaunchedEffect(externalVideoUri) {
                 val source = externalVideoUri ?: return@LaunchedEffect
                 val video = withContext(Dispatchers.IO) { com.vxplayer.library.inspectLocalVideo(applicationContext, Uri.parse(source), Uri.parse(source).lastPathSegment ?: "Video") }

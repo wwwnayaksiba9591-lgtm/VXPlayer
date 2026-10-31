@@ -8,6 +8,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WebPageRoutesTest {
+    @Test fun webPagesOpenImmediatelyWhileUnknownAutoLinksAreProbed() {
+        assertFalse(WebPageRoutes.needsProbe("https://example.com/watch","Web"))
+        assertFalse(WebPageRoutes.needsProbe("https://morencius.com/file/bbw8t89l8cls","Auto"))
+        assertFalse(WebPageRoutes.needsProbe("https://example.com/video.mp4","Auto"))
+        assertFalse(WebPageRoutes.needsProbe("https://example.com/stream","HLS"))
+        assertTrue(WebPageRoutes.needsProbe("https://example.com/watch","Auto"))
+    }
     private val pages = listOf("https://morencius.com/file/bbw8t89l8cls",
         "https://morencius.com/embed/bbw8t89l8cls", "https://m4uplay.quest/file/tm187qcf23hh")
     @Test fun suppliedPagesUseWebInAutoButRespectForcedNativeTypes() {
@@ -34,6 +41,7 @@ class WebPageRoutesTest {
         assertFalse(WebShield.blocked("https://cdn.example.com/hls/stream/master.m3u8?token=abc"))
         assertTrue(WebShield.blocked("https://morencius.com/ad?type=123"))
         assertTrue(WebShield.blocked("https://m4uplay.quest/assets/jquery/ev-static.js?type=mainstream"))
+        assertTrue(WebShield.blocked("https://morencius.com/assets/jquery/ev-static.js"))
         assertTrue(WebShield.blocked("https://mc.yandex.ru/metrika/tag.js"))
         assertTrue(WebShield.blocked("https://imasdk.googleapis.com/js/sdkloader/ima3.js"))
     }

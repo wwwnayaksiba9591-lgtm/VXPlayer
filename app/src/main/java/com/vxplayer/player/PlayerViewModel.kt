@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.async
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(application: Application, private val savedState: SavedStateHandle) : AndroidViewModel(application) {
@@ -53,6 +54,34 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private var rebuilding: Job? = null
     private var effectsConfigured = false
     private val diagnostics = PlaybackDiagnostics()
+    private fun seekMessage(message: String) {notice=message;android.widget.Toast.makeText(getApplication(),message,android.widget.Toast.LENGTH_SHORT).show()}
+    private val seekScope=kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()+Dispatchers.Main.immediate)
+    private var castBridge: com.vxplayer.cast.CastBridge? = null
+    var casting by mutableStateOf(false); private set
+    val playback: Player? get() = if(casting && castBridge?.ownedBy(this)==true)castBridge?.player else player
+    fun prepareCast() {
+        if(castBridge?.ownedBy(this)==true || isPrivatePlayback)return
+        runCatching {
+            castBridge=com.vxplayer.cast.CastBridge.obtain(this,getApplication(),{player},{active ->
+                casting=active
+                if(active)castBridge?.player?.let {isPlaying=it.isPlaying;buffering=it.playbackState==Player.STATE_BUFFERING}
+            },{position,playing ->
+                casting=false;savedState["position"]=position
+                currentUri?.let {positions.save(it,position)}
+                player?.let {it.seekTo(position);it.playWhenReady=playing && foreground}
+            })
+            casting=castBridge?.active==true
+            if(casting)castBridge?.player?.let {isPlaying=it.isPlaying;buffering=it.playbackState !in listOf(Player.STATE_READY,Player.STATE_ENDED)}
+        }.onFailure {notice="Cast is unavailable. Use Cast screen in playback options."}
+    }
+    var softwareDecoding by mutableStateOf(application.getSharedPreferences("vxplayer",0).all["softwareDecoding"] as? Boolean ?: false)
+        private set
+    private var decoderRetried = false
+    fun toggleDecoder() {
+        softwareDecoding=!softwareDecoding; decoderRetried=false
+        preferences.edit().putBoolean("softwareDecoding",softwareDecoding).apply()
+        rebuildEnhancementPlayer(if(softwareDecoding)"Software decoding" else "Hardware decoding preferred")
+    }
     private var sourceFormat: androidx.media3.common.Format? = null
     private var formatUri: String? = null
     private var warmingAttempted = false
@@ -87,9 +116,9 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     private var subtitleWork: Job? = null
     var subtitleSize by mutableStateOf(preferences.getFloat("subtitleSize", 20f))
         private set
-    var subtitleColor by mutableStateOf(preferences.getInt("subtitleColor", android.graphics.Color.WHITE))
+    var subtitleColor by mutableStateOf(preferences.all["subtitleColor"] as? Int ?: android.graphics.Color.WHITE)
         private set
-    var subtitleBackground by mutableStateOf(preferences.getInt("subtitleBackground", 0x99000000.toInt()))
+    var subtitleBackground by mutableStateOf(preferences.all["subtitleBackground"] as? Int ?: 0x99000000.toInt())
         private set
     fun styleSubtitles(size: Float = subtitleSize, color: Int = subtitleColor, background: Int = subtitleBackground) {
         subtitleSize = size; subtitleColor = color; subtitleBackground = background
@@ -128,7 +157,10 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState.get<ArrayList<String>>("shuffleHistory").orEmpty(), savedState.get<Int>("shuffleIndex") ?: 0,
         savedState.get<ArrayList<String>>("shuffleRemaining").orEmpty()))
     fun cyclePlaybackMode() {
-        playbackMode = playbackMode.next()
+        selectPlaybackMode(playbackMode.next())
+    }
+    fun selectPlaybackMode(mode: PlaybackMode) {
+        playbackMode = mode
         AppSettings.get(getApplication()).update { it.copy(playbackMode = playbackMode) }
         playlistCursor = PlaylistCursor()
         savePlaylistCursor()
@@ -174,6 +206,15 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
     var isPlaying by mutableStateOf(false)
         private set
+    var muted by mutableStateOf(false)
+        private set
+    private var audibleVolume = 1f
+    fun toggleMute() {
+        val engine = player ?: return
+        if (engine.volume > 0) { audibleVolume = engine.volume; engine.volume = 0f }
+        else engine.volume = audibleVolume.takeIf { it > 0 } ?: 1f
+        muted = engine.volume == 0f
+    }
     var speed by mutableStateOf(savedState.get<Float>("speed") ?: AppSettings.get(application).state.value.speed)
         private set
     private val positions = PlaybackPositionStore.get(application)
@@ -188,10 +229,13 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         private set
     var seeking by mutableStateOf(false)
         private set
-    fun changeSeekDragging(value: Boolean) { seekDragging = value }
+    fun changeSeekDragging(value: Boolean) {
+        seekDragging = value
+        if(value)player?.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+    }
     private var currentUri: String? = null
     private var privateId: String? = null
-    private val pauseForMusic: () -> Unit = { savedState["playWhenReady"] = false; player?.pause(); if (backgroundEnabled) setBackground(false); if (!foreground) stop() }
+    private val pauseForMusic: () -> Unit = {savedState["playWhenReady"] = false; player?.pause(); if (backgroundEnabled) setBackground(false); if (!foreground) stop() }
     val isPrivatePlayback: Boolean get() = privateId != null
     private val privatePositions = application.getSharedPreferences("private-playback", 0)
 
@@ -209,36 +253,43 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["activeTitle"] = activeTitle
         currentUri = selectedUri
         if (formatUri != selectedUri) {
+            softwareDecoding=preferences.all["softwareDecoding"] as? Boolean ?: false;decoderRetried=false
             formatUri = selectedUri; sourceFormat = null; warmingAttempted = false; diagnostics.reset(); sourceSize = 0
             muteProblemAudio = false; failedAudioFormats.clear()
         }
         if (!muteProblemAudio) audioWarning = null
-        effectsDisabled = preferences.getBoolean(effectsKey(selectedUri), false)
+        effectsDisabled = preferences.all[effectsKey(selectedUri)] as? Boolean ?: false
         audioEnhancer.blockEffects(effectsDisabled)
         privateId = PrivateRepository.privateId(getApplication(), Uri.parse(selectedUri))
         if (isPrivatePlayback && !PrivateAccess.unlocked) {
             failed = true; failureMessage = "Unlock Private to play this video."; return
         }
-        subtitleDelayMs = preferences.getInt(subtitleDelayKey(selectedUri), 0).coerceIn(-60_000, 60_000)
+        subtitleDelayMs = (preferences.all[subtitleDelayKey(selectedUri)] as? Int ?: 0).coerceIn(-60_000, 60_000)
         audioEnhancer.newVideo(selectedUri)
         videoEnhancer.newVideo(selectedUri)
         if (effectsDisabled) videoEnhancer.unavailable("Enhancement is unavailable for this video after a playback problem.")
-        subtitleEncoding = preferences.getString("srtEncoding:${subtitleDelayKey(selectedUri)}", "Auto")?.takeIf { it in SubtitleText.encodings } ?: "Auto"
-        starting = viewModelScope.launch {
+        subtitleEncoding = (preferences.all["srtEncoding:${subtitleDelayKey(selectedUri)}"] as? String)?.takeIf { it in SubtitleText.encodings } ?: "Auto"
+        starting = viewModelScope.launch(kotlinx.coroutines.CoroutineExceptionHandler {_,_->
+            failed=true;buffering=false;isPlaying=false
+            failureMessage="Could not initialize playback. Retry or choose another decoder."
+            val current=player;player=null
+            runCatching {BackgroundPlaybackService.detach(getApplication(),current)}
+            runCatching {current?.release()}
+        }) {
+            // Folder scans run alongside preparation; the first frame does not depend on the playlist.
+            val folderLoad: kotlinx.coroutines.Deferred<List<PlaylistVideo>>? = if (playlist.isEmpty()) async(Dispatchers.IO) {
+                try { loadFolderPlaylist(getApplication(), folder) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { emptyList() }
+            } else null
             if (!selectedUri.startsWith("http", true)) sourceSize = withContext(Dispatchers.IO) {
                 runCatching { getApplication<Application>().contentResolver.openFileDescriptor(Uri.parse(selectedUri), "r")?.use { it.statSize.coerceAtLeast(0) } ?: 0L }.getOrDefault(0L)
-            }
-            if (playlist.isEmpty()) {
-                playlist = try { withContext(Dispatchers.IO) { loadFolderPlaylist(getApplication(), folder) } }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { emptyList() }
-                if (playlist.none { it.uri == selectedUri }) playlist = listOf(PlaylistVideo(selectedUri, activeTitle))
             }
             val resumeAlias = if (!isPrivatePlayback && !selectedUri.startsWith("http", true)) withContext(Dispatchers.IO) {
                 com.vxplayer.library.legacyResumeAlias(getApplication(), Uri.parse(selectedUri))
             } else null
             val position = savedState.get<Long>("position") ?: try {
-                privateId?.let { privatePositions.getLong(it, 0L) } ?: positions.load(selectedUri) ?: resumeAlias?.let { alias ->
+                privateId?.let { (privatePositions.all[it] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L } ?: positions.load(selectedUri) ?: resumeAlias?.let { alias ->
                     positions.load(alias)?.also { old -> positions.save(selectedUri, old); positions.save(alias, 0) }
                 } ?: 0L
             } catch (cancelled: CancellationException) {
@@ -278,16 +329,42 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 }
             }
             val networkApproved = userMediaSessionAllowed(selectedUri, preferences.contains("streamType:$selectedUri"))
+            val network = selectedUri.startsWith("http",true)
+            val sourceFactory = withContext(Dispatchers.IO) {
+                val stored=preferences.all
+                directMediaFactory(getApplication(),networkApproved,buildMap {
+                    (stored["mediaReferer:$selectedUri"] as? String)?.let {put("Referer",it)}
+                    (stored["mediaUserAgent:$selectedUri"] as? String)?.let {put("User-Agent",it)}
+                })
+            }
+            val buffer = playbackBuffer(network)
             val renderers = object : DefaultRenderersFactory(getApplication<Application>()) {
                 override fun getCodecAdapterFactory(): androidx.media3.exoplayer.mediacodec.MediaCodecAdapter.Factory =
                     diagnostics.trackAdapters(super.getCodecAdapterFactory())
-            }.setEnableDecoderFallback(true).setMediaCodecSelector(diagnostics.selector)
+            }.setEnableDecoderFallback(true).setMediaCodecSelector(androidx.media3.exoplayer.mediacodec.MediaCodecSelector { mime,secure,tunnel ->
+                val candidates=diagnostics.selector.getDecoderInfos(mime,secure,tunnel)
+                if(softwareDecoding && mime.startsWith("video/"))candidates.filter {it.softwareOnly}
+                else candidates.sortedBy {if(it.hardwareAccelerated)0 else 1}
+            })
             player = ExoPlayer.Builder(getApplication<Application>(), renderers)
                 .setUsePlatformDiagnostics(false)
-                .setMediaSourceFactory(DefaultMediaSourceFactory(directMediaFactory(getApplication(), networkApproved))
+                .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000)
+                .setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(buffer.minMs,buffer.maxMs,buffer.playbackMs,buffer.rebufferMs)
+                    .setTargetBufferBytes(buffer.bytes).setPrioritizeTimeOverSizeThresholds(false)
+                    .setBackBuffer(10_000,true).build())
+                .setMediaSourceFactory(DefaultMediaSourceFactory(sourceFactory,androidx.media3.extractor.DefaultExtractorsFactory()
+                    .setConstantBitrateSeekingEnabled(true).setConstantBitrateSeekingAlwaysEnabled(true))
                     .setLoadErrorHandlingPolicy(DirectMediaLoadErrorPolicy()))
                 .build().apply {
                 val owner = this
+                addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+                    override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,decoderName: String,initializedTimestampMs: Long,initializationDurationMs: Long) {
+                        if(player===owner && diagnostics.isSoftwareDecoder(decoderName) && !softwareDecoding) {
+                            softwareDecoding=true;notice="Hardware decoder unavailable. Using software decoding."
+                        }
+                    }
+                })
                 addAnalyticsListener(diagnostics.listener)
                 setWakeMode(C.WAKE_MODE_LOCAL)
                 setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
@@ -315,6 +392,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                         ensureSupportedAudio(value)
                         val videoGroups = value.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
                         if (!backgroundEnabled && videoGroups.isNotEmpty() && videoGroups.none { group -> (0 until group.length).any { group.isTrackSupported(it, true) } }) {
+                            if(softwareDecoding && !decoderRetried) {
+                                decoderRetried=true;softwareDecoding=false
+                                rebuildEnhancementPlayer("Software decoder cannot handle this video. Trying hardware decoding.")
+                                return
+                            }
                             failed = true
                             failureMessage = "Video format is not supported on this device: ${videoGroups.first().getTrackFormat(0).let(::formatDetails)}"
                             diagnostics.capabilityFailure(videoGroups.first().getTrackFormat(0))
@@ -333,10 +415,17 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                     override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
                         if (player !== owner) return
-                        savedState["trackParameters"] = parameters.toBundle()
+                        // Audio-only backgrounding is temporary, not a saved video-track preference.
+                        savedState["trackParameters"] = parameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO,false).build().toBundle()
                     }
                     override fun onPlayerError(error: PlaybackException) {
                         if (player !== owner) return
+                        if(casting) {owner.pause();return}
+                        if(softwareDecoding && !decoderRetried && error.errorCode in 4000..4999) {
+                            decoderRetried=true;softwareDecoding=false
+                            rebuildEnhancementPlayer("Software decoder unavailable. Trying hardware decoding.")
+                            return
+                        }
                         val current = player
                         val usedEffects = effectsConfigured || audioEnhancer.effectsInUse
                         diagnostics.record(error, usedEffects)
@@ -380,13 +469,16 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         if (player !== owner) return
+                        if(casting)return
                         if (playing) PlaybackCoordinator.startingVideo(this@PlayerViewModel)
                         this@PlayerViewModel.isPlaying = playing
                         if (playing && !isPrivatePlayback) currentUri?.let { positions.recordPlayed(it, activeTitle) }
                         if (!playing) savePlaybackState()
                     }
+                    override fun onVolumeChanged(volume: Float) { if (player === owner) muted = volume == 0f }
                     override fun onPlaybackStateChanged(state: Int) {
                         if (player !== owner) return
+                        if(casting)return
                         buffering = state == Player.STATE_BUFFERING
                         if (state == Player.STATE_ENDED) {
                             savePlaybackState()
@@ -416,7 +508,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 seekTo(position.coerceAtLeast(0L))
                 setSeekParameters(if (preferSyncSeek(sourceFormat?.containerMimeType, activeTitle)) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
                 setPlaybackSpeed(this@PlayerViewModel.speed)
-                playWhenReady = pendingBackgroundReplacement == null && (savedState.get<Boolean>("playWhenReady") ?: true)
+                volume = if(this@PlayerViewModel.muted)0f else audibleVolume
+                playWhenReady = !casting && pendingBackgroundReplacement == null && (savedState.get<Boolean>("playWhenReady") ?: true)
                 configureEnhancement(this, force = true)
                 prepare()
             }
@@ -466,6 +559,17 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                     failed = true; failureMessage = "Playback could not recover after seeking. Retry this video."
                 }
             }
+            folderLoad?.await()?.let { loaded ->
+                playlist = if (loaded.any { it.uri == selectedUri }) loaded else listOf(PlaylistVideo(selectedUri, activeTitle))
+                // A short clip can end before a large folder scan completes.
+                if (player?.playbackState == Player.STATE_ENDED && advance?.isActive != true &&
+                    (playbackMode != PlaybackMode.Off || AppSettings.get(getApplication()).state.value.autoNext)) {
+                    advance = viewModelScope.launch {
+                        yield()
+                        if (activeUri == selectedUri && player?.playbackState == Player.STATE_ENDED) moveInPlaylist(1,atEnd=true)
+                    }
+                }
+            }
         }
     }
 
@@ -482,8 +586,9 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 disableEffectsForVideo(videoEnhancer.reason.orEmpty())
                 rebuildEnhancementPlayer(videoEnhancer.reason)
             }
-        } else if (!warmingAttempted && !effectsDisabled && foreground && !backgroundEnabled &&
-            videoGroups.any { group -> (0 until group.length).any { group.isTrackSupported(it, true) } }) {
+        } else if (needsEnhancementWarmup(videoEnhancer.enabled,effectsConfigured,warmingAttempted,
+            videoEnhancer.available && !effectsDisabled,foreground,backgroundEnabled,
+            videoGroups.any { group -> (0 until group.length).any { group.isTrackSupported(it, true) } })) {
             warmingAttempted = true
             rebuildEnhancementPlayer()
         }
@@ -496,7 +601,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         audioEnhancer.smartProfile(videoEnhancer.lastMode, active)
         if (force) {
             effectsConfigured = false
-            if (videoEnhancer.available && sourceFormat != null && !enhancementUnavailable) try {
+            if (videoEnhancer.enabled && videoEnhancer.available && sourceFormat != null && !enhancementUnavailable) try {
                 // Keep one neutral shader installed from preparation. Taps change uniforms only.
                 current.setVideoEffects(listOf(videoEnhancer.effect))
                 effectsConfigured = true
@@ -565,6 +670,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         }
     }
     private fun refreshEnhancement() {
+        if(videoEnhancer.enabled && !effectsConfigured) checkEnhancePath()
         player?.let { configureEnhancement(it) }
         repaint?.cancel()
         // Live uniforms update with the next rendered frame; never force decoder seeks to repaint.
@@ -609,19 +715,39 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         bMs = end; return true
     }
     fun clearRepeat() { aMs = null; bMs = null }
-    fun onHidden() { foreground = false; if (!backgroundEnabled) stop() else savePlaybackState() }
-    fun close() { setBackground(false); stop() }
+    fun onForeground() {
+        foreground = true
+        player?.let { current ->
+            current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build()
+            configureEnhancement(current)
+        }
+    }
+    fun onHidden() {
+        foreground = false
+        if (!backgroundEnabled) stop() else {
+            savePlaybackState()
+            player?.let { current ->
+                current.clearVideoSurface()
+                current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build()
+                configureEnhancement(current)
+            }
+        }
+    }
+    // The service owns the active session until explicitly stopped; leaving a screen must not release it.
+    fun close() { if (backgroundEnabled && player != null) onHidden() else stop() }
 
     fun setBackground(enabled: Boolean): Boolean {
+        if(casting) {notice="Casting already runs in the background.";return false}
         if (enabled && isPrivatePlayback) { notice = "Private playback pauses when hidden."; return false }
         val current = player ?: return false
         if (enabled) {
             current.play()
-            if (!BackgroundPlaybackService.begin(getApplication(), current) { backgroundEnabled = false; stop() }) return false
+            if (!com.vxplayer.music.VideoSessionHandoff.begin(getApplication(),current,{backgroundEnabled=false;stop()},
+                sessionPlayer=SeekSessionPlayer(current,::seekBy,{seekTo(it)}))) return false
         } else BackgroundPlaybackService.detach(getApplication(), current)
         backgroundEnabled = enabled
         configureEnhancement(current)
-        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, enabled).build()
+        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, enabled && !foreground).build()
         return true
     }
 
@@ -650,7 +776,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         val builder = MediaItem.Builder().setUri(uri)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
         if (uri.scheme.equals("http", true) || uri.scheme.equals("https", true)) {
-            val type = preferences.getString("streamType:$uri", "Auto")
+            val type = preferences.all["streamType:$uri"] as? String ?: "Auto"
             when (type) {
                 "HLS" -> builder.setMimeType(MimeTypes.APPLICATION_M3U8)
                 "DASH" -> builder.setMimeType(MimeTypes.APPLICATION_MPD)
@@ -689,6 +815,24 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun loadSubtitle(uri: Uri, name: String) {
+        subtitleWork?.cancel()
+        val video = currentUri ?: return
+        val offset = subtitleDelayMs
+        val encoding = subtitleEncoding
+        subtitleWork = viewModelScope.launch {
+            try {
+                // Validate/read before remembering this file or changing the working tracks.
+                val cached = withContext(Dispatchers.IO) {
+                    ShiftedSubtitleCache.prepare(getApplication(), uri, offset, preparedSubtitle, encoding)
+                }
+                if (video != currentUri) return@launch
+                attachSubtitle(uri, name, cached)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { notice = "Could not load external SRT. The video and existing subtitles are kept." }
+        }
+    }
+
+    private fun attachSubtitle(uri: Uri, name: String, cached: Uri) {
         savedState["subtitleUri"] = uri.toString()
         savedState["subtitleName"] = name
         hasExternalSrt = true
@@ -709,7 +853,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         savedState["trackParameters"] = updated.toBundle()
         savedState["selectExternal"] = true
         player?.trackSelectionParameters = updated
-        reloadExternalSubtitle(select = true)
+        reloadExternalSubtitle(select = true, cachedUri = cached)
     }
 
     fun changeSubtitleDelay(delta: Int, reset: Boolean = false) {
@@ -719,7 +863,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         reloadExternalSubtitle(select = false)
     }
 
-    private fun reloadExternalSubtitle(select: Boolean) {
+    private fun reloadExternalSubtitle(select: Boolean, cachedUri: Uri? = null) {
         subtitleWork?.cancel()
         val source = savedState.get<String>("subtitleUri") ?: return
         val video = currentUri ?: return
@@ -727,7 +871,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         subtitleWork = viewModelScope.launch {
             delay(120)
             try {
-                val cached = withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), offset, preparedSubtitle, subtitleEncoding) }
+                val cached = cachedUri ?: withContext(Dispatchers.IO) { ShiftedSubtitleCache.prepare(getApplication(), Uri.parse(source), offset, preparedSubtitle, subtitleEncoding) }
                 if (video != currentUri) return@launch
                 preparedSubtitle = cached; preparedSource = source; preparedDelay = offset
                 val current = player ?: return@launch
@@ -743,7 +887,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
     }
 
     fun savePlaybackState() {
-        player?.let {
+        if(casting && (castBridge?.ownedBy(this)!=true || playback?.playbackState in listOf(Player.STATE_IDLE,Player.STATE_BUFFERING)))return
+        playback?.let {
             val position = if (it.playbackState == Player.STATE_ENDED) 0L else it.currentPosition.coerceAtLeast(0L)
             savedState["position"] = position
             savedState["playWhenReady"] = it.playWhenReady && it.playbackState != Player.STATE_ENDED
@@ -760,37 +905,51 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         if (value !in SPEEDS) return
         speed = value
         savedState["speed"] = value
-        player?.setPlaybackSpeed(value)
+        playback?.let {runCatching {it.setPlaybackSpeed(value)}.onFailure {notice="Speed is unavailable on this receiver."}}
     }
 
     fun seekBy(offsetMs: Long): Boolean {
-        val current = player ?: return false
-        if (!current.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) || !current.isCurrentMediaItemSeekable) return false
+        val current = playback ?: return false
+        if (!current.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) || !current.isCurrentMediaItemSeekable) {
+            seekMessage("This file has no usable seek index, or the stream does not allow seeking.");return false
+        }
         seekTo(seekWithOffset(seekRequests.pending ?: current.currentPosition, offsetMs, current.duration))
         return true
     }
 
     fun seekTo(position: Long, exact: Boolean = false) {
+        if(casting) {playback?.let {remote->runCatching {remote.seekTo(boundedSeek(position,remote.duration))}};return}
         val current = player ?: return
-        if (!current.isCurrentMediaItemSeekable) return
+        if (!current.isCurrentMediaItemSeekable) {notice="This file has no usable seek index, or the stream does not allow seeking.";return}
         seekRequests.request(position,current.duration,SystemClock.elapsedRealtime())
         seekWork?.cancel(); seekWatchdog?.cancel(); seekSave?.cancel()
         seeking = true
-        seekWork = viewModelScope.launch {
+        seekWork = seekScope.launch {
             delay(100)
             val target = seekRequests.take(SystemClock.elapsedRealtime()) ?: return@launch
             if (player !== current) return@launch
-            current.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
-            current.seekTo(target)
+            current.setSeekParameters(if (exactSeekForJump(exact,current.currentPosition,target)) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+            val before=current.currentPosition
+            try {current.seekTo(target)} catch(_: RuntimeException){seeking=false;notice="Seeking failed. Try another position.";return@launch}
             buffering = true
-            seekWatchdog = viewModelScope.launch {
+            seekWatchdog = seekScope.launch {
                 var started = SystemClock.elapsedRealtime()
                 var retried = false
+                var quickRetry=false
                 var anchor = current.currentPosition
                 while (player === current) {
                     delay(250)
                     val elapsed = SystemClock.elapsedRealtime() - started
                     val ready = current.playbackState == Player.STATE_READY
+                    if(!quickRetry && elapsed>=500 && kotlin.math.abs(target-before)>=1000 && kotlin.math.abs(current.currentPosition-before)<300) {
+                        quickRetry=true
+                        current.setSeekParameters(if(exact)SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
+                        runCatching {current.seekTo(boundedSeek(target,current.duration))}
+                    }
+                    if(quickRetry && elapsed>=1500 && kotlin.math.abs(current.currentPosition-before)<300) {
+                        seeking=false;buffering=current.playbackState==Player.STATE_BUFFERING
+                        notice="This file could not seek to that position. Its index may be missing or damaged.";break
+                    }
                     if (current.playbackState == Player.STATE_ENDED || (ready && (!current.playWhenReady || current.currentPosition > anchor + 250))) {
                         seeking = false; buffering = false
                         seekSave = viewModelScope.launch { delay(600); savePlaybackState() }
@@ -824,6 +983,7 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         subtitleWork?.cancel(); subtitleWork = null
         rebuilding?.cancel(); rebuilding = null
         effectsConfigured = false
+        warmingAttempted = false
         repaint?.cancel(); repaint = null
         enhanceOn = false
         audioEnhancer.release()
@@ -839,6 +999,8 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
         player = null
         if (keepBackgroundPlayer) pendingBackgroundReplacement = previous
         else {
+            BackgroundPlaybackService.detach(getApplication(), previous)
+            backgroundEnabled = false
             previous?.release()
             pendingBackgroundReplacement?.let { pending ->
                 pendingBackgroundReplacement = null
@@ -846,11 +1008,11 @@ class PlayerViewModel(application: Application, private val savedState: SavedSta
                 pending.release(); backgroundEnabled = false
             }
         }
-        isPlaying = false
-        buffering = false
+        isPlaying = casting && castBridge?.player?.isPlaying==true
+        buffering = casting && castBridge?.player?.playbackState==Player.STATE_BUFFERING
     }
 
-    override fun onCleared() { close() }
+    override fun onCleared() {close();castBridge?.abandon(this);castBridge=null }
 
     companion object {
         val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)

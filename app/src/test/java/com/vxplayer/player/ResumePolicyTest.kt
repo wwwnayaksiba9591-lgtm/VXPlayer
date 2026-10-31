@@ -5,6 +5,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ResumePolicyTest {
+    @Test fun folderShortcutUsesMostRecentUnfinishedAccessibleVideo() {
+        val old=ResumeVideo("old","Old",positionMs=10,durationMs=100,playedAt=1)
+        val latest=old.copy(uri="latest",playedAt=5)
+        assertEquals("latest",selectFolderResumeVideo(listOf(old,latest,latest.copy(uri="done",positionMs=100,playedAt=9),
+            latest.copy(uri="hidden",privateVideo=true,playedAt=10),latest.copy(uri="missing",accessible=false,playedAt=11)))?.uri)
+        assertNull(selectFolderResumeVideo(listOf(old.copy(positionMs=0),old.copy(positionMs=100))))
+        assertNull(selectFolderResumeVideo(emptyList()))
+    }
     @Test fun newestUnfinishedWinsOverFinishedAndOlderCheckpoints() {
         val records = listOf(ResumeVideo("done", "Done", playedAt = 30, watched = true),
             ResumeVideo("older", "Older", positionMs = 100, playedAt = 10), ResumeVideo("network", "Stream", positionMs = 200, playedAt = 20))

@@ -21,7 +21,7 @@ import com.vxplayer.ui.VXIconButton
 fun SmartEnhanceControl(model: PlayerViewModel, openModes: () -> Unit, touch: () -> Unit) {
     val engine = model.videoEnhancer
     val accent = MaterialTheme.colorScheme.primary
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(48.dp).combinedClickable(role = Role.Button,
             onClick = { model.toggleSmartEnhance(); touch() }, onLongClick = { openModes(); touch() })
             .semantics { contentDescription = "Enhance"; stateDescription = if (engine.enabled) "On, ${engine.lastMode}" else "Off" },

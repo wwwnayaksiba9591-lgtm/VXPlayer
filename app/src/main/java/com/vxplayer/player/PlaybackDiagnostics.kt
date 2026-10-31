@@ -12,6 +12,8 @@ import java.util.concurrent.CopyOnWriteArraySet
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlaybackDiagnostics {
     private val candidates = CopyOnWriteArraySet<String>()
+    private val software = CopyOnWriteArraySet<String>()
+    fun isSoftwareDecoder(name: String)=name in software
     private val initialized = CopyOnWriteArraySet<String>()
     private val failures = CopyOnWriteArraySet<String>()
     private val attempted = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -29,6 +31,7 @@ class PlaybackDiagnostics {
     val selector = MediaCodecSelector { mime, secure, tunneling ->
         MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling).also { decoders ->
             decoders.forEach { candidates.add(it.name) }
+            decoders.filter {it.softwareOnly}.forEach {software.add(it.name)}
         }
     }
     val listener = object : AnalyticsListener {

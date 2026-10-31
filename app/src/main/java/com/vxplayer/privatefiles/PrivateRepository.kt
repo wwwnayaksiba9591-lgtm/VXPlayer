@@ -23,7 +23,10 @@ import kotlinx.coroutines.withContext
 class PrivateRepository(context: Context) {
     private val app = context.applicationContext
     private val resolver = app.contentResolver
-    val layout = PrivateFileLayout(File(app.filesDir, "private").apply { check(mkdirs() || isDirectory) })
+    val layout = PrivateFileLayout(File(app.filesDir, "private"))
+    @Volatile var unreadableRecords=0
+        private set
+    private fun ensureStorage(){check(layout.root.mkdirs() || layout.root.isDirectory){"Private storage is unavailable. Your original files are kept."}}
     private val gson = Gson()
     private fun read(id: String): PrivateEntry = AtomicFile(layout.file(id, ".json")).openRead().bufferedReader().use {
         gson.fromJson(it, PrivateEntry::class.java)
@@ -37,14 +40,18 @@ class PrivateRepository(context: Context) {
     }
 
     suspend fun entries(): List<PrivateEntry> = withContext(Dispatchers.IO) {
-        layout.root.listFiles().orEmpty().mapNotNull { file ->
+        ensureStorage()
+        val ids=layout.root.listFiles().orEmpty().mapNotNull { file ->
             when {
                 file.name.endsWith(".json") -> file.name.removeSuffix(".json")
                 file.name.endsWith(".json.bak") -> file.name.removeSuffix(".json.bak")
                 else -> null
             }
-        }.distinct().mapNotNull { id ->
-            if (id in activeCopies) return@mapNotNull null
+        }.distinct()
+        val coroutine=currentCoroutineContext()
+        val (records,errors)=readPrivateRecords(ids,read@{ id ->
+            coroutine.ensureActive()
+            if (id in activeCopies) return@read null
             val entry = AtomicFile(layout.file(id, ".json")).openRead().bufferedReader().use { gson.fromJson(it, PrivateEntry::class.java) }
             require(entry.id == id && entry.size >= 0 && entry.title.isNotBlank() && entry.state in listOf("copying", "awaitingDelete", "deletingOriginal", "private")) { "Invalid private index" }
             val media = layout.recoverVerifiedCopy(entry) ?: layout.file(id)
@@ -61,10 +68,13 @@ class PrivateRepository(context: Context) {
                 verifyPrivateCopy(entry.size, media.length(), media.length())
                 entry.copy(state = "awaitingDelete").also(::write)
             } else entry
-        }.sortedBy { it.title.lowercase() }
+        })
+        unreadableRecords=errors
+        records.sortedBy {it.title.lowercase()}
     }
 
     suspend fun prepareMove(source: Uri, title: String, expected: Long, progress: (Long) -> Unit): PrivateEntry = withContext(Dispatchers.IO) {
+        ensureStorage()
         require(source.scheme == "content" && source.authority == "media") { "Only library videos can be moved." }
         val size = resolver.openFileDescriptor(source, "r")?.use { it.statSize }?.takeIf { it >= 0 } ?: expected
         val entry = PrivateEntry(UUID.randomUUID().toString(), title, source.toString(), size.coerceAtLeast(0))
@@ -205,7 +215,7 @@ class PrivateRepository(context: Context) {
     }
 
     private fun restorePosition(entry: PrivateEntry, target: Uri) {
-        val position = app.getSharedPreferences("private-playback", 0).getLong(entry.id, 0L)
+        val position = (app.getSharedPreferences("private-playback", 0).all[entry.id] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0L
         PlaybackPositionStore.get(app).save(target.toString(), position)
     }
 

@@ -71,7 +71,9 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     fun access() = permissions().any { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     var allowed by remember { mutableStateOf(access()) }
     var requested by rememberSaveable { mutableStateOf(false) }
-    var tab by rememberSaveable { mutableIntStateOf(1) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    // Migrate a restored selection from the removed Videos tab to Folders.
+    LaunchedEffect(tab) { if (tab == 1) tab = 0 }
     var selectedFolder by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(openMusic) { if (openMusic) { tab = 3; selectedFolder = null; musicModel.nowPlaying = true; onMusicOpened() } }
     com.vxplayer.music.MusicOverlays(musicModel)
@@ -116,9 +118,12 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
     }
     BackHandler(selectedFolder != null) { selectedFolder = null; tab = 0 }
     val folder = state.folders.firstOrNull { it.key == selectedFolder }
-    val folders = orderLibrary(state.folders.filter { it.name.contains(query, true) || it.videos.any { video -> video.title.contains(query, true) } },
-        sort, descending, { it.name }, { it.videos.maxOfOrNull { video -> video.dateAdded } ?: 0L },
-        { it.videos.sumOf { video -> video.sizeBytes } }, { it.videos.sumOf { video -> video.durationMs } })
+    val allVideos=remember(state.folders){state.folders.flatMap {it.videos}}
+    val folderNames=remember(state.folders){state.folders.associate {it.key to it.name}}
+    val folders by produceState(state.folders,state.folders,query,sort,descending) {
+        value=withContext(Dispatchers.Default) { orderLibrary(state.folders.filter {it.name.contains(query,true) || it.videos.any {video->video.title.contains(query,true)}},
+            sort,descending,{it.name},{it.videos.maxOfOrNull {video->video.dateAdded} ?: 0L},{it.videos.sumOf {video->video.sizeBytes}},{it.videos.sumOf {video->video.durationMs}}) }
+    }
     Surface(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding()) {
@@ -146,8 +151,13 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
             if (search && tab != 3) OutlinedTextField(query, onValueChange = { query = it }, label = { Text("Search videos or folders") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), singleLine = true)
             if (tab in 0..2) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Box {
-                    TextButton(onClick = { sortOpen = true }) { Text("Sort: $sort") }
+                    TextButton(onClick = { sortOpen = true }) { Text("Sort: ${if(sort==LibrarySort.Date && descending) "Newest first" else sort.name}") }
                     DropdownMenu(sortOpen, onDismissRequest = { sortOpen = false }) {
+                        DropdownMenuItem(text={Text(if(sort==LibrarySort.Date && descending) "Newest first ✓" else "Newest first")},onClick={
+                            sort=LibrarySort.Date;descending=true
+                            preferences.edit().putString("sort",LibrarySort.Date.name).putBoolean("descending",true).apply()
+                            sortOpen=false
+                        })
                         LibrarySort.entries.forEach { value -> DropdownMenuItem(text = { Text(value.name) }, onClick = { sort = value; preferences.edit().putString("sort", value.name).apply(); sortOpen = false }) }
                         DropdownMenuItem(text = { Text(if (descending) "Descending ✓" else "Ascending ✓") }, onClick = { descending = !descending; preferences.edit().putBoolean("descending", descending).apply(); sortOpen = false })
                     }
@@ -180,29 +190,37 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                         TextButton(onClick = { picker.launch(permissions()) }) { Text(stringResource(R.string.manage_access)) }
                     }
                     if (selectedFolder == null && displayedTab == 0) {
-                        LazyColumn(state = folderScroll, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LazyColumn(modifier=Modifier.libraryFastScroll(folderScroll),state = folderScroll, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (folders.isEmpty()) item { LibraryMessage("No folders found", "Add a video to your device or change the search.", { query = ""; model.refresh(access()) }) }
                             items(folders, key = { it.key }) { group ->
+                                val resume = selectFolderResumeVideo(group.videos.map { ResumeVideo(it.uri.toString(),it.title,positionMs=it.positionMs,durationMs=it.durationMs,playedAt=it.lastPlayedAt) })
+                                val resumeVideo = group.videos.firstOrNull { it.uri.toString()==resume?.uri }
                                 VXCard(onClick = { selectedFolder = group.key }, modifier = Modifier.fillMaxWidth()) {
                                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        FolderIcon()
+                                        if(resumeVideo!=null) VideoThumbnail(resumeVideo,Modifier.width(128.dp))
+                                        else FolderIcon()
                                         Column(Modifier.weight(1f)) {
                                             Text(group.name, style = MaterialTheme.typography.titleMedium)
                                             Text("${group.videos.size} videos · ${Formatter.formatShortFileSize(context, group.videos.sumOf { it.sizeBytes })}", style = MaterialTheme.typography.bodySmall)
                                         }
+                                        if(resumeVideo!=null) ResumeRowButton {onVideoClick(resumeVideo,group.key)}
                                     }
                                 }
                             }
                         }
                     } else {
-                        val baseVideos = if (selectedFolder != null) folder?.videos.orEmpty() else if (displayedTab == 2) state.recentlyPlayed else state.folders.flatMap { it.videos }
-                        val filtered = baseVideos.filter { video -> video.title.contains(query, true) || state.folders.any { it.key == video.folderKey && it.name.contains(query, true) } }
-                        val videos = if (displayedTab == 2 && selectedFolder == null) filtered else orderLibrary(filtered, sort, descending, { it.title }, { it.dateAdded }, { it.sizeBytes }, { it.durationMs })
+                        val baseVideos = if (selectedFolder != null) folder?.videos.orEmpty() else if (displayedTab == 2) state.recentlyPlayed else allVideos
+                        val videos by produceState(baseVideos,baseVideos,query,folderNames,sort,descending,displayedTab,selectedFolder) {
+                            value=withContext(Dispatchers.Default) {
+                                val filtered=baseVideos.filter {video->video.title.contains(query,true) || folderNames[video.folderKey]?.contains(query,true)==true}
+                                if(displayedTab==2 && selectedFolder==null)filtered else orderLibrary(filtered,sort,descending,{it.title},{it.dateAdded},{it.sizeBytes},{it.durationMs})
+                            }
+                        }
                         if (videos.isEmpty()) LibraryMessage("No videos here yet", "Try another folder, allow more videos, or change the search.", { query = ""; model.refresh(access()) })
-                        else if (grid) LazyVerticalGrid(state = gridScroll, columns = GridCells.Adaptive(180.dp), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        else if (grid) LazyVerticalGrid(modifier=Modifier.libraryFastScroll(gridScroll),state = gridScroll, columns = GridCells.Adaptive(180.dp), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             gridItems(videos, key = { it.uri.toString() }) { video ->
                                 VXCard(onClick = { onVideoClick(video, video.folderKey) }) {
-                                    VideoThumbnail(video, Modifier.fillMaxWidth())
+                                    VideoThumbnail(video, Modifier.fillMaxWidth()) { onVideoClick(video,video.folderKey) }
                                     Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(video.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -214,7 +232,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
                                 }
                             }
                         } else
-                        LazyColumn(state = if (selectedFolder != null) detailScroll else if (displayedTab == 2) recentScroll else videosScroll,
+                        LazyColumn(modifier=Modifier.libraryFastScroll(if(selectedFolder!=null)detailScroll else if(displayedTab==2)recentScroll else videosScroll),state = if (selectedFolder != null) detailScroll else if (displayedTab == 2) recentScroll else videosScroll,
                             contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (videos.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
                             items(videos, key = { it.uri.toString() }) { video -> VideoRow(video, onClick = { onVideoClick(video, video.folderKey) }) {
@@ -229,7 +247,7 @@ fun LibraryScreen(onVideoClick: (Video, String) -> Unit, onSettings: () -> Unit 
             }
             com.vxplayer.music.MusicMiniPlayer(musicModel)
             NavigationBar {
-                listOf(Triple(1,"Videos",Icons.Default.VideoLibrary),Triple(0,"Folders",Icons.Default.Folder),Triple(3,"Music",Icons.Default.LibraryMusic),Triple(2,"Recent",Icons.Default.History),Triple(4,"More",Icons.Default.MoreHoriz)).forEach { (index,label,icon) ->
+                listOf(Triple(0,"Folders",Icons.Default.Folder),Triple(3,"Music",Icons.Default.LibraryMusic),Triple(2,"Recent",Icons.Default.History),Triple(4,"More",Icons.Default.MoreHoriz)).forEach { (index,label,icon) ->
                     NavigationBarItem(selected = tab == index,onClick = { tab = index; selectedFolder = null },icon = { Icon(icon,label) },label = { Text(label) },
                         colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary,selectedTextColor = MaterialTheme.colorScheme.primary,indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha=.18f)))
                 }
@@ -263,31 +281,25 @@ private fun FolderIcon() {
     Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
 }
 
-private val thumbnails = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
-    override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
-}
-
 @Composable
-fun VideoThumbnail(video: Video, modifier: Modifier = Modifier) {
+fun VideoThumbnail(video: Video, modifier: Modifier = Modifier, onResume: (() -> Unit)? = null) {
     val context = LocalContext.current
-    val cacheKey = "${video.uri}:${video.dateAdded}:${video.sizeBytes}"
-    val bitmap by produceState(thumbnails.get(cacheKey), cacheKey) {
-        if (value == null) value = withContext(Dispatchers.IO) {
-            try {
-                val result = runCatching { if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(video.uri, Size(256, 160), null)
-                else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver, ContentUris.parseId(video.uri), MediaStore.Video.Thumbnails.MINI_KIND, null)
-                } }.getOrNull() ?: fallbackVideoThumbnail(context, video.uri)
-                result?.also { thumbnails.put(cacheKey, it) }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { null }
-        }
+    val cacheKey = VideoThumbnailStore.key(video)
+    val cancellation=remember(cacheKey){android.os.CancellationSignal()}
+    DisposableEffect(cancellation){onDispose {cancellation.cancel()}}
+    val bitmap by produceState(VideoThumbnailStore.peek(video), cacheKey) {
+        try {if(value==null)value=VideoThumbnailStore.load(context,video,cancellation)}
+        catch(cancelled: CancellationException){throw cancelled}
+        catch(_: Exception){value=null}
     }
     Column(modifier.clip(VXShapes.small)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1.6f).background(MaterialTheme.colorScheme.surfaceVariant)) {
             Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Center))
             bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            if(onResume!=null && video.positionMs>0 && (video.durationMs<=0 || video.positionMs<video.durationMs))
+                FilledIconButton(onClick=onResume,shape=androidx.compose.foundation.shape.CircleShape,
+                    colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color.Black.copy(alpha=.7f),contentColor=Color.White),
+                    modifier=Modifier.align(Alignment.CenterEnd).padding(end=4.dp).size(48.dp)) { Icon(Icons.Default.PlayArrow,"Resume ${video.title}") }
             Text(formatDuration(video.durationMs), color = Color.White, style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).background(Color.Black.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp))
         }
@@ -308,7 +320,14 @@ fun VideoRow(video: Video, onClick: () -> Unit, trailing: @Composable () -> Unit
             if (video.watched) Text(stringResource(R.string.watched), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         trailing()
+        if(video.positionMs>0 && (video.durationMs<=0 || video.positionMs<video.durationMs))ResumeRowButton(onClick)
     }
+    }
+}
+
+@Composable private fun ResumeRowButton(play: ()->Unit) {
+    FilledIconButton(onClick=play,shape=androidx.compose.foundation.shape.CircleShape,modifier=Modifier.size(48.dp)) {
+        Icon(Icons.Default.PlayArrow,"Continue playback")
     }
 }
 

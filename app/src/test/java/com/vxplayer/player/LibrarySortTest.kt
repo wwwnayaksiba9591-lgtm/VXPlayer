@@ -15,4 +15,10 @@ class LibrarySortTest {
         assertEquals(listOf("a", "B", "Z"), sorted(LibrarySort.Size))
         assertEquals(listOf("Z", "B", "a"), sorted(LibrarySort.Duration))
     }
+    @Test fun newestFirstUsesDescendingDateAndKeepsUnknownDatesLast() {
+        assertEquals(listOf("a", "B", "Z"), sorted(LibrarySort.Date, true))
+        val withUnknown=items+Item("Unknown",0,0,0)
+        assertEquals(listOf("a", "B", "Z", "Unknown"),orderLibrary(withUnknown,LibrarySort.Date,true,
+            {it.name},{it.date},{it.size},{it.duration}).map {it.name})
+    }
 }

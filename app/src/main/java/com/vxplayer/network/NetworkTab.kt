@@ -57,13 +57,13 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
     var favouriteName by rememberSaveable { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val validation = if (url.isBlank()) null else runCatching { StreamUrls.validate(url) }.exceptionOrNull()?.message
+    val validation = if (url.isBlank()) null else runCatching { StreamUrls.normalize(url) }.exceptionOrNull()?.message
     fun clipboardText(): String? {
         val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         return manager.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.trim()
     }
     LaunchedEffect(Unit) {
-        copiedLink = runCatching { clipboardText()?.let(StreamUrls::validate) }.getOrNull()
+        copiedLink = runCatching { clipboardText()?.let(StreamUrls::normalize) }.getOrNull()
         model.refreshPositions()
     }
     fun play(link: NetworkLink, replaceAttachment: Boolean = true) {
@@ -71,10 +71,13 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
         busy = true; error = null
         scope.launch {
             try {
-                if (WebPageRoutes.useWeb(link.url, link.streamType)) {
-                    val selected = model.repository.played(link.copy(streamType = "Web", subtitleUri = null, subtitleName = null), true)
+                val normalized=link.copy(url=StreamUrls.normalize(link.url))
+                val probe=if(WebPageRoutes.needsProbe(normalized.url,normalized.streamType)) com.vxplayer.library.StreamPageProbe.inspect(normalized.url) else null
+                if (WebPageRoutes.useWeb(normalized.url, normalized.streamType) || (probe!=null && !probe.media)) {
+                    // Let WebView follow the original page's redirects/cookies itself.
+                    val selected = model.repository.played(normalized.copy(streamType = "Web", subtitleUri = null, subtitleName = null), true)
                     WebPlayerActivity.open(context, selected.url)
-                } else onPlay(model.repository.played(link, replaceAttachment))
+                } else onPlay(model.repository.played(normalized.copy(url=probe?.url ?: normalized.url), replaceAttachment))
                 onOpened()
             }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -119,7 +122,7 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                             IconButton(onClick = { url = runCatching { clipboardText() }.getOrNull().orEmpty(); error = null }, enabled = !busy) { Icon(Icons.Default.ContentPaste,"Paste") }
                             IconButton(onClick = { url = ""; error = null }, enabled = !busy && url.isNotEmpty()) { Icon(Icons.Default.Clear,"Clear") }
                         } }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(onGo = { if (!busy && url.isNotBlank() && validation == null) play(NetworkLink(StreamUrls.validate(url),name.trim(),streamType = type,subtitleUri = subtitle,subtitleName = subtitleName),attachmentChanged) }),
+                        keyboardActions = KeyboardActions(onGo = { if (!busy && url.isNotBlank() && validation == null) play(NetworkLink(StreamUrls.normalize(url),name.trim(),streamType = type,subtitleUri = subtitle,subtitleName = subtitleName),attachmentChanged) }),
                         modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy, isError = validation != null,
                         supportingText = { Text(validation ?: if (WebPageRoutes.useWeb(url, type))
                             "Video page detected. Play opens the web player with Shield ON." else
@@ -147,19 +150,19 @@ fun NetworkTab(onPlay: (NetworkLink) -> Unit, model: NetworkViewModel = viewMode
                     Text("HTTP is unencrypted. Links and access tokens are stored locally.", style = MaterialTheme.typography.bodySmall)
                     if (WebPageRoutes.useWeb(url, type)) Text("Tap the video's play icon after the page opens. Web pages use their own controls and subtitles.", style = MaterialTheme.typography.bodySmall)
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (error != null) TextButton(onClick = { play(NetworkLink(StreamUrls.validate(url),name.trim(),streamType = type,subtitleUri = subtitle,subtitleName = subtitleName),attachmentChanged) }, enabled = !busy && url.isNotBlank() && validation == null) { Text("Retry") }
-                    Button(onClick = { play(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = type,
+                    if (error != null) TextButton(onClick = { play(NetworkLink(StreamUrls.normalize(url),name.trim(),streamType = type,subtitleUri = subtitle,subtitleName = subtitleName),attachmentChanged) }, enabled = !busy && url.isNotBlank() && validation == null) { Text("Retry") }
+                    Button(onClick = { play(NetworkLink(StreamUrls.normalize(url), name.trim(), streamType = type,
                         subtitleUri = subtitle, subtitleName = subtitleName), attachmentChanged) },
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
                         if (busy) CircularProgressIndicator(Modifier.size(20.dp),strokeWidth = 2.dp) else Icon(Icons.Default.PlayArrow, null)
                         Text(if (busy) "Opening…" else if (WebPageRoutes.useWeb(url, type)) "Play in web player" else "Play")
                     }
-                    OutlinedButton(onClick = { play(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = "Web")) },
+                    OutlinedButton(onClick = { play(NetworkLink(StreamUrls.normalize(url), name.trim(), streamType = "Web")) },
                         enabled = !busy && url.isNotBlank() && validation == null, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.Language, null); Spacer(Modifier.width(8.dp)); Text("Open web player · Shield ON")
                     }
                     Text("Web Shield blocks known ad/tracker requests and popups. Some websites may not work with blocking enabled.", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { edit(NetworkLink(StreamUrls.validate(url), name.trim(), streamType = type,
+                    TextButton(onClick = { edit(NetworkLink(StreamUrls.normalize(url), name.trim(), streamType = type,
                         subtitleUri = subtitle, subtitleName = subtitleName)) }, enabled = !busy && url.isNotBlank() && validation == null) {
                         Icon(Icons.Outlined.StarBorder, null); Spacer(Modifier.width(6.dp)); Text("Save favourite")
                     }

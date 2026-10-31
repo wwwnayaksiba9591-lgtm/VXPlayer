@@ -10,30 +10,69 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.LruCache
 import androidx.palette.graphics.Palette
+import android.os.Bundle
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
-fun scanMusic(context: Context, hideShort: Boolean): List<Song> {
-    val volumes = if (Build.VERSION.SDK_INT >= 29) MediaStore.getExternalVolumeNames(context) else setOf("external")
-    return volumes.flatMap { volume ->
-        val collection = MediaStore.Audio.Media.getContentUri(volume)
-        val projection = mutableListOf("_id","title","artist","album","duration","album_id","track","year","date_added","_display_name")
-        if (Build.VERSION.SDK_INT >= 29) projection += "relative_path"
-        val result = mutableListOf<Song>()
-        val selection = "is_music != 0 AND is_ringtone = 0 AND is_notification = 0 AND is_alarm = 0" + if (Build.VERSION.SDK_INT >= 31) " AND is_recording = 0" else ""
-        context.contentResolver.query(collection,projection.toTypedArray(),selection,null,null)?.use { cursor ->
-            fun text(key: String) = cursor.getColumnIndex(key).takeIf { it >= 0 }?.let { cursor.getString(it) }.orEmpty()
-            fun number(key: String) = cursor.getColumnIndex(key).takeIf { it >= 0 }?.let { cursor.getLong(it) } ?: 0
-            while (cursor.moveToNext()) {
-                val duration = number("duration")
-                if (hideShort && duration < 30_000) continue
-                val relative = text("relative_path")
-                if (relative.split('/').any { it.equals("Recordings",true) || it.equals("Voice Recorder",true) }) continue
-                result += Song(ContentUris.withAppendedId(collection,number("_id")).toString(),text("title").ifBlank { text("_display_name") },
-                    text("artist").takeUnless { it.isBlank() || it == "<unknown>" } ?: "Unknown artist",text("album").ifBlank { "Unknown album" },
-                    duration,number("album_id"),number("track").toInt(),number("year").toInt(),number("date_added"),volume,relative,text("_display_name"))
-            }
+suspend fun scanMusic(context: Context): AudioScanResult {
+    val volumes = linkedSetOf("internal","external") // external is MediaStore.VOLUME_EXTERNAL, the merged shared-storage view.
+    if (Build.VERSION.SDK_INT >= 29) volumes += runCatching { MediaStore.getExternalVolumeNames(context) }.getOrDefault(emptySet())
+    val result = linkedMapOf<String,Song>()
+    val failed = linkedSetOf<String>()
+    for (volume in volumes) {
+        for (files in listOf(false,true)) {
+            currentCoroutineContext().ensureActive()
+            val collection = if (files) MediaStore.Files.getContentUri(volume) else MediaStore.Audio.Media.getContentUri(volume)
+            val projection = mutableListOf("_id","_display_name","mime_type","date_added")
+            if (!files) projection += listOf("title","artist","album","duration","album_id","track","year")
+            if (Build.VERSION.SDK_INT >= 29) projection += listOf("relative_path","volume_name")
+            var lastId = -1L
+            try {
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val audioSelection = if (files) " AND (media_type = 2 OR mime_type LIKE 'audio/%' OR " +
+                        AudioLibraryPolicy.extensions.joinToString(" OR ") { "LOWER(_display_name) LIKE '%.$it'" } + ")" else ""
+                    val selection = "_id > ?$audioSelection"
+                    val args = arrayOf(lastId.toString())
+                    val cursor = try { if (Build.VERSION.SDK_INT >= 26) {
+                        context.contentResolver.query(collection,projection.toTypedArray(),Bundle().apply {
+                            putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION,selection)
+                            putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,args)
+                            putStringArray(android.content.ContentResolver.QUERY_ARG_SORT_COLUMNS,arrayOf("_id"))
+                            putString(android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER,"_id ASC")
+                            putInt(android.content.ContentResolver.QUERY_ARG_SORT_DIRECTION,android.content.ContentResolver.QUERY_SORT_DIRECTION_ASCENDING)
+                            putInt(android.content.ContentResolver.QUERY_ARG_LIMIT,500)
+                        },null)
+                    } else context.contentResolver.query(collection,projection.toTypedArray(),selection,args,"_id ASC")
+                    } catch (_: IllegalArgumentException) {
+                        // Older/OEM providers may not expose optional volume columns or structured arguments.
+                        context.contentResolver.query(collection,projection.filterNot { it in setOf("relative_path","volume_name") }.toTypedArray(),selection,args,"_id ASC")
+                    }
+                    if(cursor==null){if(!files)failed+=volume;break}
+                    var rows = 0
+                    val previousId = lastId
+                    cursor?.use {
+                        fun text(key: String) = it.getColumnIndex(key).takeIf { index -> index >= 0 }?.let { index -> it.getString(index) }.orEmpty()
+                        fun number(key: String) = it.getColumnIndex(key).takeIf { index -> index >= 0 }?.let { index -> it.getLong(index) } ?: 0
+                        while (it.moveToNext()) {
+                            currentCoroutineContext().ensureActive()
+                            val id = number("_id"); lastId = maxOf(lastId,id); rows++
+                            val name = text("_display_name")
+                            if (files && !AudioLibraryPolicy.isAudio(text("mime_type"),name)) continue
+                            val actualVolume = text("volume_name").ifBlank { volume }
+                            val key = "${if (volume == "internal") "internal" else "external"}:$id"
+                            if (key !in result) result[key] = AudioLibraryPolicy.map(
+                                ContentUris.withAppendedId(if (files) MediaStore.Files.getContentUri(actualVolume) else MediaStore.Audio.Media.getContentUri(actualVolume),id).toString(),
+                                text("title"),name,text("artist"),text("album"),number("duration"),number("album_id"),number("track").toInt(),number("year").toInt(),number("date_added"),actualVolume,text("relative_path"))
+                        }
+                    }
+                    if (rows < 500 || lastId <= previousId) break
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { if (!files) failed += volume }
         }
-        result
-    }.distinctBy { it.uri }
+    }
+    return AudioScanResult(result.values.toList(),failed)
 }
 
 data class MusicArtwork(val bitmap: Bitmap?, val color: Int)

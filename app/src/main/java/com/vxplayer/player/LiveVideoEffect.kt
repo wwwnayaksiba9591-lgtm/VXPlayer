@@ -69,11 +69,14 @@ private class EnhanceShader(private val parameters: LiveEnhanceParameters) : Bas
             varying highp vec2 vTexSamplingCoord;
             void main() {
                 vec4 center = texture2D(uTexSampler, vTexSamplingCoord);
-                vec3 nearby = (texture2D(uTexSampler, vTexSamplingCoord + vec2(uTexel.x, 0.0)).rgb
-                    + texture2D(uTexSampler, vTexSamplingCoord - vec2(uTexel.x, 0.0)).rgb
-                    + texture2D(uTexSampler, vTexSamplingCoord + vec2(0.0, uTexel.y)).rgb
-                    + texture2D(uTexSampler, vTexSamplingCoord - vec2(0.0, uTexel.y)).rgb) * 0.25;
-                vec3 rgb = center.rgb + (center.rgb - nearby) * uAdjust.w * 1.5;
+                vec3 rgb = center.rgb;
+                if (uAdjust.w != 0.0) {
+                    vec3 nearby = (texture2D(uTexSampler, vTexSamplingCoord + vec2(uTexel.x, 0.0)).rgb
+                        + texture2D(uTexSampler, vTexSamplingCoord - vec2(uTexel.x, 0.0)).rgb
+                        + texture2D(uTexSampler, vTexSamplingCoord + vec2(0.0, uTexel.y)).rgb
+                        + texture2D(uTexSampler, vTexSamplingCoord - vec2(0.0, uTexel.y)).rgb) * 0.25;
+                    rgb += (rgb - nearby) * uAdjust.w * 1.5;
+                }
                 rgb = (rgb - 0.5) * (1.0 + uAdjust.y) + 0.5;
                 float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
                 rgb = mix(vec3(luma), rgb, uAdjust.z) + uAdjust.x;

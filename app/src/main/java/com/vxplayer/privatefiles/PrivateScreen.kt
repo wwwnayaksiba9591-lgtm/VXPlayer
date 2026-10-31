@@ -25,7 +25,7 @@ import com.vxplayer.settings.VXTheme
 @Composable
 fun PrivateScreen(activity: PrivateActivity, model: PrivateViewModel = viewModel()) {
     val prefs = remember { activity.getSharedPreferences("vxplayer", 0) }
-    var explained by remember { mutableStateOf(prefs.getBoolean("privateWarningAccepted", false)) }
+    var explained by remember { mutableStateOf(prefs.all["privateWarningAccepted"] as? Boolean ?: false) }
     var delete by remember { mutableStateOf<PrivateEntry?>(null) }
     var permissionOperation by rememberSaveable { mutableStateOf<String?>(null) }
     var permissionEntry by rememberSaveable { mutableStateOf<String?>(null) }
@@ -46,7 +46,11 @@ fun PrivateScreen(activity: PrivateActivity, model: PrivateViewModel = viewModel
         model.consentResult(it.resultCode == Activity.RESULT_OK)
     }
     LaunchedEffect(model.consent, model.busy, PrivateAccess.unlocked) {
-        if (PrivateAccess.unlocked && !model.busy) model.consent?.let { model.consumeConsent(); consent.launch(it) }
+        if (PrivateAccess.unlocked && !model.busy) model.consent?.let {
+            model.consumeConsent()
+            try { consent.launch(it) }
+            catch (_: Exception) { model.consentLaunchFailed() }
+        }
     }
     LaunchedEffect(model.pendingFinishId, model.busy, PrivateAccess.unlocked) {
         if (!model.busy && PrivateAccess.unlocked) {
@@ -72,7 +76,9 @@ fun PrivateScreen(activity: PrivateActivity, model: PrivateViewModel = viewModel
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Private is locked", style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = activity::authenticate, enabled = explained) { Text("Unlock") }
+                Button(onClick = activity::authenticate, enabled = explained && !activity.authenticating) { Text(if(activity.authenticating)"Unlocking…" else "Unlock") }
+                OutlinedButton(onClick=activity::authenticateDeviceCredential,enabled=explained && !activity.authenticating){Text("Use device PIN / pattern")}
+                TextButton(onClick={runCatching {activity.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))}}){Text("Android security settings")}
                 activity.authenticationMessage?.let { Text(it) }
                 TextButton(onClick = { activity.finish() }) { Text("Back to library") }
             }
@@ -105,6 +111,9 @@ fun PrivateScreen(activity: PrivateActivity, model: PrivateViewModel = viewModel
                 TextButton(onClick = model::cancel) { Text("Cancel transfer") }
             }
             model.message?.let { message -> item { Text(message); TextButton(onClick = model::clearMessage) { Text("Dismiss") } } }
+            if(!model.busy && activity.intent.data!=null && model.message!=null && model.entries.none {it.originalUri==activity.intent.data.toString()})item {
+                TextButton(onClick={model.retryMove(activity.intent.data,activity.intent.getStringExtra("title") ?: "Video",activity.intent.getLongExtra("size",-1))}){Text("Retry move")}
+            }
             if (model.entries.isEmpty() && !model.busy) item { Text("No private videos. Use a library video’s menu → Move to Private.") }
             items(model.entries, key = { it.id }) { entry ->
                 Card(Modifier.fillMaxWidth()) {

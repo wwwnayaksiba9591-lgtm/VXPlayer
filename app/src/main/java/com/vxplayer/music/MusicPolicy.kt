@@ -2,6 +2,7 @@ package com.vxplayer.music
 
 import kotlin.random.Random
 
+@androidx.compose.runtime.Immutable
 data class Song(val uri: String, val title: String, val artist: String = "Unknown artist", val album: String = "Unknown album",
     val duration: Long = 0, val albumId: Long = 0, val track: Int = 0, val year: Int = 0, val added: Long = 0,
     val volume: String = "external", val relativePath: String = "", val fileName: String = "")
@@ -20,6 +21,17 @@ fun <T> removeMusic(items: List<T>, index: Int): List<T> = items.filterIndexed {
 fun <T> shuffledMusic(items: List<T>, first: T?, random: Random = Random.Default): List<T> =
     items.distinct().filter { it != first }.shuffled(random).let { if (first != null && first in items) listOf(first) + it else it }
 fun nextMusicRepeat(mode: Int) = when (mode) { 0 -> 2; 2 -> 1; else -> 0 } // Media3 off/all/one
+
+/** Bounded traversal bypasses repeat-one so a broken track cannot trap playback. */
+fun nextMusicAfterError(ids: List<String>, current: Int, failed: Set<String>, order: List<Int> = ids.indices.toList(), wrap: Boolean = false): Int? {
+    val validOrder=order.filter { it in ids.indices }.distinct()
+    val offset=validOrder.indexOf(current)
+    val candidates=if(offset<0)validOrder else validOrder.drop(offset+1) + if(wrap)validOrder.take(offset) else emptyList()
+    return candidates.firstOrNull { ids[it] !in failed }
+}
+
+fun Song.folderKey() = "$volume:${relativePath.trimEnd('/')}"
+fun Song.folderLabel() = relativePath.trimEnd('/').substringAfterLast('/').ifBlank { if(volume=="internal")"Internal audio" else "Shared audio" }
 fun <T> musicQueueWindow(items: List<T>, index: Int, limit: Int = 5000): Pair<List<T>,Int> {
     if (items.isEmpty()) return emptyList<T>() to 0
     val selected = index.coerceIn(items.indices)

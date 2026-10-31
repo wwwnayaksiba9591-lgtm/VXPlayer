@@ -13,6 +13,17 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.vxplayer.library.StreamPageProbe
 import com.vxplayer.library.StreamUrls
 import java.io.IOException
+import androidx.media3.datasource.cache.*
+import androidx.media3.database.StandaloneDatabaseProvider
+
+/** Constructed on Dispatchers.IO; one bounded cache owns the directory for the process. */
+@androidx.annotation.OptIn(UnstableApi::class)
+private object StreamCache {
+    private var instance: SimpleCache? = null
+    @Synchronized fun get(context: Context): SimpleCache = instance ?: SimpleCache(
+        java.io.File(context.cacheDir,"media-streams"),LeastRecentlyUsedCacheEvictor(256L*1024*1024),
+        StandaloneDatabaseProvider(context.applicationContext)).also {instance=it}
+}
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class DirectMediaLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
@@ -24,11 +35,16 @@ class DirectMediaLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
 
 /** The only HTTP entry point. Local playback has no network capability. */
 @androidx.annotation.OptIn(UnstableApi::class)
-fun directMediaFactory(context: Context, approved: Boolean): DataSource.Factory {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Mozilla/5.0 (Android) VXPlayer/${com.vxplayer.BuildConfig.VERSION_NAME}")
+fun directMediaFactory(context: Context, approved: Boolean, headers: Map<String,String> = emptyMap()): DataSource.Factory {
+    val safe=headers.filter {it.key in setOf("Referer","User-Agent") && it.value.none {ch->ch=='\r'||ch=='\n'}}
+    val http = DefaultHttpDataSource.Factory().setUserAgent(safe["User-Agent"] ?: StreamPageProbe.MOBILE_UA).setDefaultRequestProperties(safe)
         .setConnectTimeoutMs(8000).setReadTimeoutMs(12000).setAllowCrossProtocolRedirects(true)
         .setContentTypePredicate { !StreamPageProbe.isHtml(it) }
-    return DefaultDataSource.Factory(context, DataSource.Factory { DirectMediaDataSource(http.createDataSource(), approved) })
+    val guarded = DataSource.Factory { DirectMediaDataSource(http.createDataSource(), approved) }
+    if(!approved)return DefaultDataSource.Factory(context,guarded)
+    val cached = runCatching { CacheDataSource.Factory().setCache(StreamCache.get(context)).setUpstreamDataSourceFactory(guarded)
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR) }.getOrNull() ?: guarded
+    return DefaultDataSource.Factory(context,cached)
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)

@@ -7,6 +7,16 @@ import java.io.OutputStream
 data class PrivateEntry(val id: String, val title: String, val originalUri: String, val size: Long,
     val state: String = "copying", val restoreUri: String? = null)
 
+/** A single damaged journal must not make every intact private video disappear. */
+fun <T> readPrivateRecords(ids: List<String>,read: (String)->T?): Pair<List<T>,Int> {
+    var errors=0
+    val entries=ids.mapNotNull {id ->
+        try {read(id)} catch(cancelled: java.util.concurrent.CancellationException){throw cancelled}
+        catch(_: Exception){errors++;null}
+    }
+    return entries to errors
+}
+
 fun requirePrivateCopyRemovable(state: String) {
     check(state != "deletingOriginal") { "Finish or cancel the Android deletion request before removing this private copy." }
 }

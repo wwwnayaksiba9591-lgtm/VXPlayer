@@ -25,6 +25,10 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.DefaultTrackNameProvider
 import com.vxplayer.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,21 +37,32 @@ fun TrackMenu(model: PlayerViewModel) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
+    var online by remember { mutableStateOf(false) }
+    var browserSearch by remember { mutableStateOf(false) }
+    var searchTitle by remember { mutableStateOf("") }
+    var browserError by remember { mutableStateOf<String?>(null) }
     val names = remember(context) { DefaultTrackNameProvider(context.resources) }
+    val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        model.choosingSubtitle = false
-        if (uri != null) {
+        if (uri == null) model.choosingSubtitle = false
+        else scope.launch {
             try {
-                val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                    if (it.moveToFirst()) it.getString(0) else null
-                } ?: uri.lastPathSegment.orEmpty()
+                val name = withContext(Dispatchers.IO) {
+                    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    } ?: uri.lastPathSegment.orEmpty()
+                }
                 if (!name.endsWith(".srt", ignoreCase = true)) error = true
                 else {
-                    try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                    catch (_: SecurityException) { /* The current document grant still allows playback. */ }
+                    withContext(Dispatchers.IO) {
+                        try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                        catch (_: SecurityException) { /* The current document grant still allows playback. */ }
+                    }
                     model.loadSubtitle(uri, name)
                 }
-            } catch (_: Exception) { error = true }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { error = true }
+            finally { model.choosingSubtitle = false }
         }
     }
     Box {
@@ -75,8 +90,17 @@ fun TrackMenu(model: PlayerViewModel) {
                 }
             }
             DropdownMenuItem(text = { Text(stringResource(R.string.load_subtitle)) },
-                onClick = { expanded = false; model.choosingSubtitle = true; picker.launch(arrayOf("*/*")) })
+                onClick = {
+                    expanded = false; model.choosingSubtitle = true
+                    try { picker.launch(arrayOf("*/*")) }
+                    catch (_: Exception) { model.choosingSubtitle = false; error = true }
+                })
             HorizontalDivider()
+            DropdownMenuItem(text={Text("Search subtitles in browser (no API key)")},enabled=!model.isPrivatePlayback,
+                onClick={expanded=false;searchTitle=subtitleSearchTitle(model.activeTitle);browserError=null;browserSearch=true})
+            DropdownMenuItem(text={Text("Online English subtitles (API key)")},enabled=!model.isPrivatePlayback,
+                onClick={expanded=false;online=true})
+            if(model.isPrivatePlayback) Text("Online subtitle search is disabled for Private videos.",modifier=Modifier.padding(horizontal=16.dp))
             if (model.hasExternalSrt) {
                 var encodings by remember { mutableStateOf(false) }
                 TextButton(onClick = { encodings = !encodings }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("SRT encoding: ${model.subtitleEncoding}") }
@@ -104,4 +128,21 @@ fun TrackMenu(model: PlayerViewModel) {
     }
     if (error) AlertDialog(onDismissRequest = { error = false }, text = { Text(stringResource(R.string.subtitle_error)) },
         confirmButton = { TextButton(onClick = { error = false }) { Text(stringResource(R.string.ok)) } })
+    if(online) OnlineSubtitleSheet(model,onDismiss={online=false})
+    if(browserSearch) AlertDialog(onDismissRequest={browserSearch=false},title={Text("Find English subtitles")},
+        text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("No API key needed. Search in your browser, download an SRT file, then return here and choose Load subtitle. Your search text goes to Google and the sites you open.")
+            OutlinedTextField(value=searchTitle,onValueChange={searchTitle=it.take(200)},singleLine=true,label={Text("Movie or episode title")})
+            browserError?.let {Text(it,color=MaterialTheme.colorScheme.error)}
+        }},confirmButton={TextButton(enabled=searchTitle.trim().length>=2,onClick={
+            try {
+                val url=android.net.Uri.parse("https://www.google.com/search").buildUpon()
+                    .appendQueryParameter("q","${searchTitle.trim()} English subtitles SRT download").build()
+                val intent=Intent.createChooser(Intent(Intent.ACTION_VIEW,url).addCategory(Intent.CATEGORY_BROWSABLE),"Search subtitles in browser")
+                    .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS,arrayOf(android.content.ComponentName(context,com.vxplayer.MainActivity::class.java)))
+                model.playback?.pause()
+                context.startActivity(intent)
+                browserSearch=false
+            } catch(_: Exception){browserError="Could not open a browser. Install or enable a browser and try again."}
+        }){Text("Search in browser")}},dismissButton={TextButton(onClick={browserSearch=false}){Text("Cancel")}})
 }

@@ -35,11 +35,26 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Text("Auto-play next", modifier = Modifier.weight(1f))
                 Switch(settings.autoNext, onCheckedChange = { checked -> store.update { it.copy(autoNext = checked) } })
             }
-            val aspects = listOf("Fit", "Fill", "Zoom", "100%")
-            SettingChoice("Default aspect ratio", aspects.getOrElse(settings.aspect) { "Fit" }, aspects) { label -> store.update { it.copy(aspect = aspects.indexOf(label).coerceIn(0,3)) } }
+            val aspectPrefs=remember {context.getSharedPreferences("vxplayer",0)}
+            var aspectMode by remember {mutableStateOf(com.vxplayer.player.AspectMode.parse(aspectPrefs.all["playerAspect"],settings.aspect))}
+            SettingChoice("Default aspect ratio",aspectMode.label,com.vxplayer.player.AspectMode.entries.map {it.label}) { label ->
+                aspectMode=com.vxplayer.player.AspectMode.entries.first {it.label==label}
+                aspectPrefs.edit().putString("playerAspect",aspectMode.name).apply()
+                store.update {it.copy(aspect=when(aspectMode){com.vxplayer.player.AspectMode.Fill->1;com.vxplayer.player.AspectMode.Zoom->2;com.vxplayer.player.AspectMode.Original->3;else->0})}
+            }
             SettingChoice("Accent color", settings.accent, listOf("Orange","Blue","Teal","Green","Purple")) { label -> store.update { it.copy(accent = label) } }
-            SettingChoice("Default orientation", settings.orientation, listOf("Auto", "System", "Portrait", "Landscape")) { label -> store.update { it.copy(orientation = label) } }
+            SettingChoice("Default orientation", settings.orientation, com.vxplayer.player.RotationMode.entries.map {it.label}) { label ->
+                store.update {it.copy(orientation=label)}
+                val mode=com.vxplayer.player.RotationMode.parse(label)
+                context.getSharedPreferences("vxplayer",0).edit().putString("rotationMode",mode.name).putBoolean("rotationLocked",false).putInt("rotationRequested",mode.orientation).apply()
+            }
             SettingChoice("Theme", settings.theme, listOf("System", "Light", "Dark")) { label -> store.update { it.copy(theme = label) } }
+            val webPrefs=remember {context.getSharedPreferences("vxplayer",0)}
+            var blockWeb by remember {mutableStateOf(webPrefs.all["webShield"] as? Boolean ?: true)}
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Block ads and popups",Modifier.weight(1f))
+                Switch(blockWeb,{blockWeb=it;webPrefs.edit().putBoolean("webShield",it).apply()})
+            }
             if (android.os.Build.VERSION.SDK_INT >= 31) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Dynamic color (Material You)", modifier = Modifier.weight(1f))
                 Switch(settings.dynamicColor, onCheckedChange = { checked -> store.update { it.copy(dynamicColor = checked) } })
@@ -57,12 +72,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Switch(settings.rememberEnhance, onCheckedChange = { checked -> store.update { it.copy(rememberEnhance = checked) } })
             }
             Text("Audio", style = MaterialTheme.typography.titleMedium)
-            val musicPreferences = remember(context) { context.getSharedPreferences("vxplayer",0) }
-            var hideShortMusic by remember { mutableStateOf(SettingsParser.boolean(musicPreferences.all["hideShortMusic"],true)) }
-            Row(Modifier.fillMaxWidth(),verticalAlignment = Alignment.CenterVertically) {
-                Text("Music: hide tracks shorter than 30 s",Modifier.weight(1f))
-                Switch(hideShortMusic,{hideShortMusic=it;musicPreferences.edit().putBoolean("hideShortMusic",it).apply()})
-            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Allow volume boost above 100%", modifier = Modifier.weight(1f))
                 Switch(settings.allowBoost, onCheckedChange = { checked -> store.update { it.copy(allowBoost = checked) } })

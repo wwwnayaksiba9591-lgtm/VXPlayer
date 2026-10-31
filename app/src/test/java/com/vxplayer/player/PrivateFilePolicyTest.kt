@@ -11,6 +11,11 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class PrivateFilePolicyTest {
+    @Test fun corruptJournalDoesNotHideOtherPrivateVideosOrSwallowCancellation() {
+        val (records,errors)=readPrivateRecords(listOf("good","bad","other")) {if(it=="bad")throw IOException("Corrupt journal") else it}
+        assertEquals(listOf("good","other"),records);assertEquals(1,errors)
+        assertThrows(java.util.concurrent.CancellationException::class.java){readPrivateRecords(listOf("cancel")){throw java.util.concurrent.CancellationException()}}
+    }
     @get:Rule val temporary = TemporaryFolder()
     private val id = "12345678-1234-1234-1234-123456789abc"
     @Test fun pathsStayInsidePrivateAndRejectTraversal() {

@@ -13,7 +13,7 @@ object SettingsParser {
     fun parse(values: Map<String, *>): PlaybackDefaults = PlaybackDefaults(
         speed = number(values["defaultSpeed"], 1f).takeIf { it in listOf(.5f,.75f,1f,1.25f,1.5f,2f) } ?: 1f,
         autoNext = boolean(values["autoNext"], true), aspect = integer(values["defaultAspect"], 0).takeIf { it in 0..3 } ?: 0,
-        orientation = choice(values["defaultOrientation"], listOf("Auto","System","Portrait","Landscape"), "Auto"),
+        orientation = choice(values["defaultOrientation"], listOf("Auto","System","Portrait","Landscape","Reverse Portrait","Reverse Landscape"), "Auto"),
         theme = choice(values["theme"], listOf("System","Light","Dark"), "System"),
         dynamicColor = boolean(values["dynamicColor"], false), allowBoost = boolean(values["allowBoost"], true),
         maxBoost = integer(values["maxBoost"],200).takeIf { it in listOf(150,200) } ?: 200,

@@ -28,7 +28,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     var songs by mutableStateOf<List<Song>>(emptyList()); private set
     var loading by mutableStateOf(false); private set
     var message by mutableStateOf<String?>(null); private set
-    var hideShort by mutableStateOf(SettingsParser.boolean(prefs.all["hideShortMusic"],true)); private set
     var sort by mutableStateOf(SettingsParser.enum(prefs.all["musicSort"],MusicSort.Title)); private set
     val stats = dao.stats().catch { message = "Could not read music history." }.stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
     val playlists = dao.playlists().catch { message = "Could not read playlists." }.stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
@@ -36,7 +35,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     var controller by mutableStateOf<MediaController?>(null); private set
     var current by mutableStateOf<Song?>(null); private set
     var queue by mutableStateOf<List<Song>>(emptyList()); private set
+    var queueKeys by mutableStateOf<List<String>>(emptyList()); private set
     var playing by mutableStateOf(false); private set
+    var buffering by mutableStateOf(false); private set
+    var muted by mutableStateOf(false); private set
+    var speed by mutableFloatStateOf(1f); private set
+    private var audibleVolume = 1f
     var shuffle by mutableStateOf(false); private set
     var repeat by mutableIntStateOf(0); private set
     var nowPlaying by mutableStateOf(false)
@@ -44,11 +48,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     var showEqualizer by mutableStateOf(false)
     var showSleep by mutableStateOf(false)
     private var scan: Job? = null
+    private var scanGeneration = 0
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             sync(events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED))
         }
-        override fun onPlayerError(error: PlaybackException) { message = "Could not play this track. The file may be missing or unsupported. Retry or choose another track." }
+        override fun onPlayerError(error: PlaybackException) { message = "Could not play this track. Skipping unavailable audio; choose another track if the queue has no playable files." }
+        override fun onMediaItemTransition(item: androidx.media3.common.MediaItem?,reason: Int) { message=null }
     }
     private val connection = MediaController.Builder(app,SessionToken(app,ComponentName(app,MusicPlaybackService::class.java))).buildAsync()
     init {
@@ -62,23 +68,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (refreshQueue) {
             val indexed = songs.associateBy { it.uri }
             queue = (0 until engine.mediaItemCount).map { engine.getMediaItemAt(it).let { item -> indexed[item.mediaId] ?: item.song() } }
+            queueKeys = (0 until engine.mediaItemCount).map { index -> engine.getMediaItemAt(index).mediaMetadata.extras?.getString("vx.queueId") ?: "$index:${queue[index].uri}" }
         }
         current = queue.getOrNull(engine.currentMediaItemIndex)
         playing = engine.isPlaying; shuffle = engine.shuffleModeEnabled; repeat = engine.repeatMode
+        buffering = engine.playbackState == Player.STATE_BUFFERING; muted = engine.volume == 0f; speed = engine.playbackParameters.speed
     }
     fun refresh() {
+        val generation = ++scanGeneration
         scan?.cancel()
-        hideShort = SettingsParser.boolean(prefs.all["hideShortMusic"],true)
-        if (!allowed()) { songs = emptyList(); return }
+        if (!allowed()) { songs = emptyList(); loading = false; return }
         scan = viewModelScope.launch {
             loading = true; message = null
-            try { songs = withContext(Dispatchers.IO) { scanMusic(app,hideShort) }; sync() }
+            try {
+                val scan = withContext(Dispatchers.IO) { scanMusic(app) }
+                songs = scan.songs
+                if (scan.unavailableVolumes.isNotEmpty()) message = "Some storage could not be read. Grant audio access and rescan; inaccessible or unindexed files may be missing."
+                sync()
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { message = "Could not read music. Check audio permission, then refresh." }
-            finally { loading = false }
+            finally { if(generation==scanGeneration)loading = false }
         }
     }
-    fun changeHideShort(value: Boolean) { hideShort = value; prefs.edit().putBoolean("hideShortMusic",value).apply(); refresh() }
     fun changeSort(value: MusicSort) { sort = value; prefs.edit().putString("musicSort",value.name).apply() }
     fun play(song: Song, list: List<Song> = songs, shuffled: Boolean = false) {
         val player = controller ?: run { message = "Music controls are connecting. Try again."; return }
@@ -94,6 +106,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun previous() { controller?.seekToPreviousMediaItem() }
     fun shuffleToggle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun repeatToggle() { controller?.let { it.repeatMode = nextMusicRepeat(it.repeatMode) } }
+    fun toggleMute() { controller?.let { if(it.volume>0){audibleVolume=it.volume;it.volume=0f}else it.volume=audibleVolume.takeIf {v->v>0} ?: 1f };sync(false) }
+    fun changeSpeed(value: Float) { if(value in listOf(.5f,.75f,1f,1.25f,1.5f,2f))controller?.setPlaybackSpeed(value);sync(false) }
     fun add(song: Song, next: Boolean) {
         val player = controller ?: return
         val updated = insertMusic(queue,player.currentMediaItemIndex,song,next)

@@ -37,8 +37,9 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("localRelease")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),"proguard-rules.pro")
         }
     }
     compileOptions {
@@ -54,6 +55,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.icons)
     implementation(libs.activity.compose)
+    // FragmentActivity must support the modern ActivityResultRegistry used by Compose launchers.
+    implementation(libs.fragment)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.navigation.compose)
@@ -63,6 +66,7 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
     implementation(libs.media3.effect)
+    implementation(libs.media3.cast)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.gson)
@@ -70,6 +74,8 @@ dependencies {
     implementation(libs.splashscreen)
     implementation(libs.chardet)
     implementation(libs.palette)
+    implementation(libs.okhttp)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
 }

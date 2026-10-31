@@ -2,6 +2,8 @@ package com.vxplayer.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,22 +23,15 @@ fun ResumeFab(video: ResumeVideo, scrolling: Boolean, busy: Boolean, resume: (Bo
     var menu by remember { mutableStateOf(false) }
     if (dismissed) return
     Box {
-        Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.primaryContainer,
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer, shadowElevation = 6.dp) {
-            Column(Modifier.widthIn(max = 280.dp).combinedClickable(enabled = !busy, role = Role.Button,
+            Column(Modifier.size(64.dp).combinedClickable(enabled = !busy, role = Role.Button,
                 onClick = { resume(false) }, onLongClick = { menu = true })) {
-                Row(Modifier.heightIn(min = 64.dp).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PlayArrow, "Resume last video", Modifier.size(28.dp))
-                    AnimatedVisibility(!scrolling) {
-                        Column(Modifier.padding(start = 12.dp).widthIn(max = 190.dp)) {
-                            Text("Resume", style = MaterialTheme.typography.labelLarge)
-                            Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
-                        }
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically,horizontalArrangement=Arrangement.Center) {
+                    Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary, CircleShape),contentAlignment=Alignment.Center) {
+                        Icon(Icons.Default.PlayArrow, "Resume last video", Modifier.size(28.dp),tint=MaterialTheme.colorScheme.onPrimary)
                     }
                 }
-                if (video.durationMs > 0 && video.positionMs > 0) LinearProgressIndicator(
-                    progress = { (video.positionMs.toFloat() / video.durationMs).coerceIn(0f, 1f) },
-                    modifier = (if (scrolling) Modifier.width(64.dp) else Modifier.fillMaxWidth()).height(2.dp))
             }
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {

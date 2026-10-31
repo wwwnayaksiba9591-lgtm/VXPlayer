@@ -10,11 +10,13 @@ import kotlinx.coroutines.ensureActive
 
 val VIDEO_EXTENSIONS = listOf("mp4", "mkv", "webm", "ts", "m2ts", "mts", "flv", "3gp", "3g2", "avi", "wmv", "mov", "m4v", "mpeg", "mpg", "vob", "ogv", "asf")
 
-internal suspend fun scanMediaLibrary(context: Context): List<VideoFolder> {
+internal suspend fun scanMediaLibrary(context: Context,onBatch: (List<VideoFolder>)->Unit = {}): List<VideoFolder> {
     val volumes = if (Build.VERSION.SDK_INT >= 29) MediaStore.getExternalVolumeNames(context).sorted() else listOf("external")
     val groups = linkedMapOf<String, MutableList<Video>>()
     val names = mutableMapOf<String, String>()
     var readableVolumes = 0
+    var count=0
+    fun snapshot()=groups.map {(key,videos)->VideoFolder(key,names.getValue(key),videos.distinctBy {it.uri})}.sortedBy {it.name.lowercase()}
     for (volume in volumes) {
         currentCoroutineContext().ensureActive()
         val collection = MediaStore.Files.getContentUri(volume)
@@ -56,9 +58,10 @@ internal suspend fun scanMediaLibrary(context: Context): List<VideoFolder> {
                     if (rawWidth > 0 && rawHeight > 0) dimensions.first else fallback?.width ?: 0,
                     if (rawWidth > 0 && rawHeight > 0) dimensions.second else fallback?.height ?: 0,
                     number("date_added"), text("_data"), key))
+                if(++count%256==0)onBatch(snapshot())
             }
         }
     }
     check(readableVolumes > 0 || volumes.isEmpty()) { "No external media volume could be read" }
-    return groups.map { (key, videos) -> VideoFolder(key, names.getValue(key), videos.distinctBy { it.uri }) }.sortedBy { it.name.lowercase() }
+    return snapshot()
 }

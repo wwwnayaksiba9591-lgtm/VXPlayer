@@ -81,8 +81,11 @@ fun VideoActions(video: Video, onPlay: () -> Unit, onChanged: () -> Unit) {
                     expanded = false
                     when (action) {
                         "Play" -> onPlay()
-                        "Move to Private" -> context.startActivity(Intent(context, com.vxplayer.privatefiles.PrivateActivity::class.java)
-                            .setData(video.uri).putExtra("title", video.title).putExtra("size", video.sizeBytes))
+                        "Move to Private" -> try {
+                            context.startActivity(Intent(context, com.vxplayer.privatefiles.PrivateActivity::class.java)
+                                .setData(video.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                .putExtra("title", video.title).putExtra("size", video.sizeBytes))
+                        } catch (_: Exception) { error = "Could not open Private. Your original video is kept." }
                         "Share" -> try {
                             context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                                 type = "video/*"; putExtra(Intent.EXTRA_STREAM, video.uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

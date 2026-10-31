@@ -11,8 +11,23 @@ import kotlin.math.abs
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class GesturePlayerView(context: Context) : PlayerView(context) {
+    var displayMode=AspectMode.Fit
+    private var nativeRatio=0f
+    override fun onContentAspectRatioChanged(frame: androidx.media3.ui.AspectRatioFrameLayout?,ratio: Float) {
+        nativeRatio=ratio
+        super.onContentAspectRatioChanged(frame,displayMode.ratio.takeIf {it>0} ?: ratio)
+    }
+    fun applyDisplayMode(mode: AspectMode) {
+        displayMode=mode
+        resizeMode=when(mode) {AspectMode.Fill,AspectMode.Original->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL;AspectMode.Zoom->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM;else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT}
+        findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)?.setAspectRatio(mode.ratio.takeIf {it>0} ?: nativeRatio)
+    }
     var locked = false
     var onTap: () -> Unit = {}
+    var onOpenActions: () -> Unit = {}
+    private var edge = false
+    private var edgeX = 0f
+    private var edgeY = 0f
     var onDoubleTapZone: (Int) -> Unit = {}
     var onVerticalStart: (Boolean) -> Unit = {}
     var onVertical: (Float) -> Unit = {}
@@ -57,6 +72,21 @@ class GesturePlayerView(context: Context) : PlayerView(context) {
         override fun onScale(detector: ScaleGestureDetector): Boolean { if (!locked) onZoom(detector.scaleFactor); return true }
     })
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            edge = !locked && event.x >= width - 24 * resources.displayMetrics.density
+            edgeX = event.x; edgeY = event.y
+        }
+        if (edge) {
+            val density = resources.displayMetrics.density
+            if (event.actionMasked == MotionEvent.ACTION_MOVE && com.vxplayer.ui.opensActionPanel(
+                    edgeX/density,width/density,(event.x-edgeX)/density,(event.y-edgeY)/density)) {
+                onOpenActions(); edge = false
+                cancelGesture()
+                scaling = true
+            }
+            if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) edge=false
+            return true
+        }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) scaling = false
         if (!locked) scale.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) { cancelGesture(); scaling = true }
